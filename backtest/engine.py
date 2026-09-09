@@ -30,6 +30,12 @@ X_UP, Y_DOWN = 20.0, 14.0   # 超买63日涨幅阈值20% / 超卖63日跌幅阈�
 Y_ACC = False               # 实验否决：超卖跌幅加"跌幅加速"确认（近10日跌幅 ≥ 近63日跌幅×0.6，全期/WF均变差，保留代码可复现）
 DIV_2OF3 = False            # 实验否决：顶背离扩展 RSI+MACD+量价 三选二（回撤恶化至-34.2%，保留代码可复现）
 DELAY_SELL = 1              # 实验否决：动能消失延迟成交（T+3 回撤-32.2%无增益，默认 T+1）
+# ---- v7.11 估值/年线过滤（定稿） ----
+VAL_GATE = True             # 估值剪刀差(股息率代理-10Y国债)分位门: ≥80%正常 / 50-80%半力(禁150档) / <50%超卖信号失效
+MA250_GATE = True           # 年线门: 仅 价格<250日均线 时允许超卖信号（年线上方超卖=高位回调不执行）
+WEEK_J0 = False             # 实验否决：周线共振门（wj<0 才允许超卖；"不动"/"半力"两档均降收益，保留代码可复现）
+VAL_WIN = 3                 # 剪刀差滚动分位窗口（年；2y/3y/5y/expanding 实测：3y 收益-回撤平衡且无冷启动问题；5y 冷启动致2016-19段差）
+CN10Y_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cn10y_daily.csv")
 MAX_POS = 1.50
 START = "2016-09-08"
 LOOKBACK_DAYS = 4800      # 抓取回看（update.py 用；需覆盖 2014 起指标 warm-up）
@@ -102,10 +108,33 @@ def build_signals(df, use_tr=False):
     # 近10日动量（加速确认用）
     df["hi10"] = c.rolling(10).max().shift(1)
     df["dn10"] = (c / df["hi10"] - 1) * 100
+    # ---- v7.11 估值剪刀差：股息率代理(TR/px 12个月滚动增长率) - 十年期国债收益率 ----
+    # 代理股息率系统性偏高约0.4pp（含再投资收益），分位数形态与官方一致（2024-09 高企等），仅用于分位门
+    if os.path.exists(CN10Y_CSV):
+        y10 = pd.read_csv(CN10Y_CSV, parse_dates=["date"]).set_index("date")["y10"]
+        df["div_proxy"] = (df["close"] / df["px"] / (df["close"].shift(252) / df["px"].shift(252)) - 1) * 100
+        df["y10"] = df["date"].map(y10).ffill()
+        df["spread"] = df["div_proxy"] - df["y10"]
+        # v7.11 定稿：滚动分位窗口 VAL_WIN 年（2y/3y/5y/expanding 实测选 3y；5y 冷启动 min_periods>回测预热致早期信号全禁）
+        win = int(VAL_WIN * 252)
+        df["spread_pct"] = df["spread"].rolling(win, min_periods=int(win * 0.8)).rank(pct=True)
+        df["os_half"] = df["spread_pct"].between(0.5, 0.8)
+    else:
+        df["spread"] = df["spread_pct"] = np.nan
+        df["os_half"] = False
     # 超卖 2-of-4（px；v7.10 可选跌幅加速确认：dn63≤-Y_DOWN 且 近10日跌幅≥近63日跌幅×0.6）
     drop_cond = (df["dn63"] <= -Y_DOWN) & ((df["dn10"] <= df["dn63"] * 0.6) if Y_ACC else True)
-    df["oversold"] = ((df["wj"] < J_LOW).astype(int) + (c <= df["lower"]).astype(int)
-                      + drop_cond.astype(int) + (df["wrsi"] < RSI_OS).astype(int)) >= 2
+    os_raw = ((df["wj"] < J_LOW).astype(int) + (c <= df["lower"]).astype(int)
+              + drop_cond.astype(int) + (df["wrsi"] < RSI_OS).astype(int)) >= 2
+    # v7.11 信号级过滤：估值分位<50% / 价格≥250日线 / 周线J≥0 时，超卖信号失效
+    df["ma250"] = c.rolling(250).mean()
+    if VAL_GATE:
+        os_raw = os_raw & (df["spread_pct"] >= 0.5)
+    if MA250_GATE:
+        os_raw = os_raw & (c < df["ma250"])
+    if WEEK_J0:
+        os_raw = os_raw & (df["wj"] < 0)
+    df["oversold"] = os_raw
     # A态超买三维极值（px）
     df["overbought"] = (df["wj"] > J_HIGH) & (c >= df["upper"]) & (df["up63"] >= X_UP)
     # 动能消失（px）
@@ -178,7 +207,9 @@ def replay(df, t1=True, start=START, delay_sell=DELAY_SELL):
             elif t0 is not None and d >= t0 + datetime.timedelta(days=REBUY_DAYS):
                 act = ("buy", 1.0, "A", "离场满90自然日·强制回补至100%")
         elif state in ("C", "D"):
-            if state == "C" and osig and pos < 1.5:
+            # v7.11 估值"半力"：分位 50-80% 时禁止第二档加仓至 150%
+            half = VAL_GATE and prev is not None and bool(prev["os_half"])
+            if state == "C" and osig and pos < 1.5 and not half:
                 act = ("buy", 1.5, "D", "再次超卖共振·加仓至150%")
             lost_now = prev is not None and bool(prev["momentum_lost"])
             if lost_now and pend is None:

@@ -115,6 +115,14 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
                    "j_cross_ok": bool(r["j_cross"]), "rsi_cross_ok": bool(r["rsi_cross"]),
                    "diverg_ok": bool(r["diverg"]),
                    "hi10c": round(float(r["hi10c"]), 2), "hi10rsi": round(float(r["hi10rsi"]), 2)},
+        "val": {"spread_pct": round(float(r["spread_pct"]) * 100, 1) if not pd.isna(r["spread_pct"]) else None,
+                "div_proxy": round(float(r["div_proxy"]), 2) if not pd.isna(r["div_proxy"]) else None,
+                "y10": round(float(r["y10"]), 3) if not pd.isna(r["y10"]) else None,
+                "spread": round(float(r["spread"]), 2) if not pd.isna(r["spread"]) else None,
+                "half": bool(r["os_half"]),
+                "gate_ok": (not pd.isna(r["spread_pct"])) and float(r["spread_pct"]) >= 0.5,
+                "ma250": round(float(r["ma250"]), 2),
+                "ma250_ok": float(r["px"]) < float(r["ma250"])},
         "legs": legs_info, "exit": exit_info,
         "recent_trades": trades[-12:],
         "oversold_stat": os_stat,
@@ -122,7 +130,8 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
                   "j_cross_to": E.J_CROSS_TO, "rsi_os": E.RSI_OS,
                   "rsi_cross_from": E.RSI_CROSS_FROM, "rsi_cross_to": E.RSI_CROSS_TO,
                   "x_up": E.X_UP, "y_down": E.Y_DOWN, "hold_days": E.HOLD_DAYS, "rebuy_days": E.REBUY_DAYS,
-                  "slippage_bps": E.SLIPPAGE_BPS, "fin_rate": E.FIN_RATE},
+                  "slippage_bps": E.SLIPPAGE_BPS, "fin_rate": E.FIN_RATE,
+                  "val_gate": E.VAL_GATE, "ma250_gate": E.MA250_GATE, "val_win": E.VAL_WIN},
     }
     return snap
 

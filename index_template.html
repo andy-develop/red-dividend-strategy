@@ -125,7 +125,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <span>数据日期 <b id="h-date">—</b></span>
       <span>生成时间 <b id="h-gen">—</b></span>
       <span>当前策略仓位 <b id="h-pos">—</b></span>
-      <span>策略版本 <b>v7.10</b></span>
+      <span>策略版本 <b>v7.11</b></span>
     </div>
   </header>
 
@@ -148,6 +148,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <div class="gauge-scale"><span>极度恐慌</span><span>中性</span><span>极度贪婪</span></div>
       <div class="gauge-desc" id="g-desc">—</div>
       <div class="gauge-nums" id="g-nums">—</div>
+      <div class="val-row" id="val-row" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--dim);display:flex;flex-wrap:wrap;gap:6px 14px"></div>
     </div>
   </section>
 
@@ -259,10 +260,10 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <summary>策略说明与数据口径（给懂行的人）</summary>
       <div class="detail-body">
         <ul class="rule">
-          <li><b>超卖买点</b>＝2-of-4：周线 J&lt;1 / 跌破布林下轨 / 近 63 日跌幅≥14% / 周线 RSI&lt;35，任意 2 个 → 加仓至 125%（再触发至 150%）；抄底胜率按含滑点成交价 FIFO 配对。</li>
+          <li><b>超卖买点</b>＝2-of-4 × 双重门槛（v7.11）：4 个恐慌信号（周线 J&lt;1 / 跌破布林下轨 / 近 63 日跌幅≥14% / 周线 RSI&lt;35）任意 2 个，<b>且</b> 价格 &lt;250 日线（年线下方才抄底，年线上方超卖=高位回调不执行）<b>且</b> 估值剪刀差（股息率代理−10Y国债）3 年历史分位 ≥50%（&lt;50% 不执行；50-80% 半力=禁加仓至150%）；抄底胜率按含滑点成交价 FIFO 配对。</li>
           <li><b>A 态清仓</b>＝超买三维极值：J&gt;95 且 触及/突破上轨 且 up63≥20% → 离场 0%；离场后出现超卖信号可提前回补，最迟 90 自然日强制回补。</li>
           <li><b>临时仓卖出</b>＝动能消失确认（任一）：J 从&gt;90跌破80 / RSI 从&gt;70跌破65 / 10日顶背离（收盘创新高且日线 RSI 未新高）；每档 25% 独立 60 自然日到期强制卖出。</li>
-          <li><b>执行口径（v7.10）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
+          <li><b>执行口径（v7.11）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
           <li><b>情绪温度计算法</b>：0.4×J(截断0-100) + 0.4×周线RSI + 0.2×动量分(100+dn63×3 截断0-100)，仅作直观参考，不参与任何买卖信号。</li>
           <li><b>过拟合体检</b>：8 参数敏感性（除 X_UP 外均参数平原）+ walk-forward 三区间夏普 0.45/0.56/0.75，见仓库 backtest/sensitivity.json；PBO/Deflated Sharpe 未实现。</li>
         </ul>
@@ -345,6 +346,21 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
   document.getElementById("g-ptr").style.left = (score / 100 * 100) + "%";
   document.getElementById("g-desc").textContent = desc;
   document.getElementById("g-nums").textContent = "底层指标：周线 J=" + fmt(S.wj,1) + "（<1 恐慌 / >95 贪婪）· 周线 RSI=" + fmt(S.wrsi,1) + " · 近63日自高点 " + pct1(S.dn63) + " · 温度计算法见折叠区";
+
+  // ===== ②b 估值与年线门（v7.11）=====
+  var vr = document.getElementById("val-row");
+  if (vr && S.val) {
+    var parts = [];
+    var pct = S.val.spread_pct;
+    if (pct === null || pct === undefined) { parts.push("估值剪刀差：暂无数据"); }
+    else {
+      var vWord = pct >= 80 ? "极低估 · 安全边际充足" : (pct >= 50 ? "估值中等 · 谨慎参与" : "偏高估值 · 放弃抄底");
+      parts.push("估值剪刀差历史分位 <b>" + fmt(pct,0) + "%</b>（" + vWord + "）");
+    }
+    parts.push(S.val.ma250_ok ? "价格 <b>在年线下方</b> · 允许抄底" : "价格 <b>在年线上方</b> · 高位回调不抄底");
+    if (S.val.gate_ok === false) parts.push("今日超卖信号被估值门拦截（分位<50% 不执行）");
+    vr.innerHTML = "抄底门槛（v7.11）：" + parts.join("　·　");
+  }
 
   // ===== ③ 我的仓位 =====
   var capEl = document.getElementById("capital");
