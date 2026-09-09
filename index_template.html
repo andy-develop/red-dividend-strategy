@@ -81,6 +81,13 @@ details[open]>summary::after{content:"－"}
 .chart{width:100%;height:320px}
 .chart-sm{width:100%;height:220px}
 .bt-note{font-size:12px;color:var(--dim);margin:8px 0}
+/* 策略概览 */
+.ov-hero{font-size:16px;color:var(--ink);padding:10px 12px;background:linear-gradient(135deg,rgba(29,98,181,.08),rgba(29,98,181,.02));border-radius:10px;border:1px solid rgba(29,98,181,.18)}
+.ov-stats{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.ov-cell{flex:1 1 150px;min-width:0;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:10px}
+.ov-cell .lab{font-size:11.5px;color:var(--dim)}
+.ov-cell .val{font-size:19px;font-weight:700;color:var(--ink);margin:2px 0}
+.ov-note{font-size:12.5px;color:var(--sub);background:#F0F6FD;border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-top:10px;line-height:1.6}
 /* 表格 */
 .tbl-wrap{max-width:100%;overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -212,6 +219,26 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
           <div class="g"><b>清仓离场 / 空仓</b><span>涨太多（3 个过热信号同时满足）时全部卖出落袋，等回调后再买回。</span></div>
           <div class="g"><b>融资融券</b><span>券商的借钱炒股业务：门槛 50 万资产 + 半年交易经验。没有两融账户就只做 100% 底仓，忽略加仓信号。</span></div>
         </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>策略概览 · 这套策略平时怎么操作（先看这个）</summary>
+      <div class="detail-body">
+        <div class="ov-hero">总体思想：<b>满仓 + 超跌抄底</b></div>
+        <div style="font-size:13.5px;color:var(--ink2);line-height:1.7;margin-top:8px">
+          平时把本金 100% 买成红利低波 ETF 一直拿着，不折腾；<br>
+          只在市场跌到情绪冰点（周线 J 极值超卖等 4 个恐慌信号至少 2 个共振）时，<b>短暂借钱加仓</b>到 125% / 150%，最多 60 天内卖掉回到满仓；<br>
+          极端贪婪（3 个过热信号同时满足）时<b>清仓落袋</b>，等回调后再满仓买回。
+        </div>
+        <div class="ov-stats">
+          <div class="ov-cell"><div class="lab">每年约</div><div class="val" style="color:var(--up)" id="ov-add">—</div><div class="lab">次加仓抄底</div></div>
+          <div class="ov-cell"><div class="lab">每次加仓平均持有</div><div class="val" id="ov-hold">—</div><div class="lab">天（最长 60 天）</div></div>
+          <div class="ov-cell"><div class="lab">清仓离场约</div><div class="val" style="color:var(--down)" id="ov-clear">—</div><div class="lab">次 / 年（多数年份没有）</div></div>
+          <div class="ov-cell"><div class="lab">抄底单档胜率</div><div class="val" style="color:var(--up)" id="ov-wr">—</div><div class="lab" id="ov-wl">—</div></div>
+        </div>
+        <div class="bt-note" id="ov-detail">10 年回测：共 <b id="ov-total">—</b> 次加仓（125% × <span id="ov-125">—</span> 次、150% × <span id="ov-150">—</span> 次），多数年份 2~4 次，最频繁的 2018 / 2021 年各 6 次；平均每档超跌抄底赚 <b id="ov-avg">—</b>。</div>
+        <div class="ov-note">预期管理：一年里大概会看到 <b>2~4 次</b>「今天可以加仓抄底」的提示，之后 1~2 个月内大概率出现卖点；其余时间页面都会显示「继续满仓持有」——没信号就什么都不做，这才是这套策略的常态。</div>
       </div>
     </details>
 
@@ -384,6 +411,19 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     document.getElementById("os-wr").textContent = fmt(OS.winrate,1) + "%";
     document.getElementById("os-wl").textContent = OS.wins + " 盈 / " + OS.losses + " 亏";
     document.getElementById("os-avg").textContent = pct1(OS.avg_ret);
+  }
+  // 策略概览（满仓+超跌抄底的全貌与预期）
+  var OV = BT.overview;
+  if (OV) {
+    document.getElementById("ov-add").textContent = fmt(OV.add_per_year,1) + " 次";
+    document.getElementById("ov-hold").textContent = fmt(OV.avg_hold_days,0);
+    document.getElementById("ov-clear").textContent = fmt(OV.clear_per_year,1);
+    document.getElementById("ov-wr").textContent = fmt(OV.os_winrate,1) + "%";
+    document.getElementById("ov-wl").textContent = "（" + OV.os_total + " 档：" + Math.round(OV.os_winrate/100*OV.os_total) + " 盈 / " + (OV.os_total - Math.round(OV.os_winrate/100*OV.os_total)) + " 亏）";
+    document.getElementById("ov-total").textContent = OV.add_total;
+    document.getElementById("ov-125").textContent = OV.pct125;
+    document.getElementById("ov-150").textContent = OV.pct150;
+    document.getElementById("ov-avg").textContent = pct1(OV.os_avg_ret);
   }
 
   // 图表延迟初始化

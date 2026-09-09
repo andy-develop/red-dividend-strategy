@@ -25,7 +25,7 @@ J_LOW, J_HIGH = 1.0, 95.0
 J_CROSS_FROM, J_CROSS_TO = 90.0, 80.0
 RSI_OS = 35.0
 RSI_CROSS_FROM, RSI_CROSS_TO = 70.0, 65.0
-X_UP, Y_DOWN = 20.0, 20.0
+X_UP, Y_DOWN = 20.0, 15.0   # 超买63日涨幅阈值20% / 超卖63日跌幅阈值15%（v7.8: 跌幅 20→15，敏感性唯一稳健增益）
 MAX_POS = 1.50
 START = "2016-09-08"
 LOOKBACK_DAYS = 4800      # 抓取回看（update.py 用；需覆盖 2014 起指标 warm-up）
@@ -309,6 +309,46 @@ def oversold_stats(closed):
     return st
 
 
+def overview_stats(trades, closed, df):
+    """策略概览（给用户全貌与预期）：满仓+超跌抄底的操作频率统计。
+    返回 dict: years / add_total / add_per_year / clear_total / clear_per_year /
+               temp_sell_per_year / avg_hold_days / by_year / pct125 / pct150 /
+               os_total / os_winrate / os_avg_ret / first / last"""
+    n_days = (df["date"].iloc[-1] - df["date"].iloc[0]).days
+    years = max(n_days / 365.25, 1e-9)
+    add = [t for t in trades if t["action"] == "买入" and t["pos_after"] > 100 and "期初" not in t["reason"]]
+    clear = [t for t in trades if t["action"] == "卖出" and t["pos_after"] == 0]
+    temp_sell = [t for t in trades if t["action"] == "卖出" and t["pos_after"] == 100 and t["pos_before"] > 100]
+    by_year = {}
+    for t in add:
+        by_year[t["date"][:4]] = by_year.get(t["date"][:4], 0) + 1
+    hold_days = []
+    for c in closed:
+        b = pd.Timestamp(c["buy_date"]); s = pd.Timestamp(c["sell_date"])
+        hold_days.append((s - b).days)
+    n125 = sum(1 for t in add if t["pos_after"] == 125)
+    n150 = sum(1 for t in add if t["pos_after"] == 150)
+    wins = sum(1 for c in closed if c["ret"] > 0)
+    return {
+        "years": round(years, 1),
+        "add_total": len(add),
+        "add_per_year": round(len(add) / years, 1),
+        "clear_total": len(clear),
+        "clear_per_year": round(len(clear) / years, 2),
+        "temp_sell_per_year": round(len(temp_sell) / years, 1),
+        "avg_hold_days": round(sum(hold_days) / len(hold_days), 0) if hold_days else 0,
+        "hold_min": min(hold_days) if hold_days else 0,
+        "hold_max": max(hold_days) if hold_days else 0,
+        "by_year": by_year,
+        "pct125": n125, "pct150": n150,
+        "os_total": len(closed),
+        "os_winrate": round(wins / len(closed) * 100, 1) if closed else 0.0,
+        "os_avg_ret": round(sum(c["ret"] for c in closed) / len(closed), 2) if closed else 0.0,
+        "first": df["date"].iloc[0].strftime("%Y-%m-%d"),
+        "last": df["date"].iloc[-1].strftime("%Y-%m-%d"),
+    }
+
+
 def run(tr_path, px_path, start=START, end=None):
     """完整回测入口：读数据(含 warm-up) -> 信号 -> 撮合 -> 净值 -> 指标。
     df 保留 START 前数据作指标预热；回测与净值核算从 start 起。"""
@@ -321,6 +361,7 @@ def run(tr_path, px_path, start=START, end=None):
     m["n_oversold"] = len(closed)
     return {"df": df, "df_all": df_all, "trades": trades, "closed": closed, "positions": positions,
             "ec": ec, "metrics": m, "os_stat": oversold_stats(closed),
+            "overview": overview_stats(trades, closed, df),
             "state": state, "pos": pos, "legs": legs, "t0": t0}
 
 

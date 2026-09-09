@@ -127,7 +127,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
     return snap
 
 
-def build_backtest_payload(df, trades, ec, metrics, os_stat):
+def build_backtest_payload(df, trades, ec, metrics, os_stat, overview):
     """每日重生成 backtest_data.json：日频全量净值/回撤 + 交易 + 指标 + 抄底胜率。
     指标一律用日频全量计算（抽稀仅用于页面图表展示，不用于任何指标）。"""
     n = len(ec["dates"])
@@ -146,6 +146,7 @@ def build_backtest_payload(df, trades, ec, metrics, os_stat):
         "trades": trades,
         "metrics": metrics,
         "oversold_stat": os_stat,
+        "overview": overview,
     }
 
 
@@ -168,7 +169,7 @@ def main():
     os_stat = E.oversold_stats(closed)
     print(f"      当前状态 {state}，仓位 {int(pos*100)}% | 回测 {m['total']*100:+.1f}% / 夏普 {m['sharpe']:.2f} / 回撤 {m['mdd']*100:.1f}% / {m['n_trades']}笔")
     print("[3/4] 重生成日频 backtest_data.json...")
-    bt = build_backtest_payload(df, trades, ec, m, os_stat)
+    bt = build_backtest_payload(df, trades, ec, m, os_stat, E.overview_stats(trades, closed, df))
     with open(DATA_OUT, "w", encoding="utf-8") as f:
         json.dump(bt, f, ensure_ascii=False)
     print(f"      {DATA_OUT} ({len(bt['dates'])} 采样点 / {len(trades)} 笔 / {bt['end']})")
