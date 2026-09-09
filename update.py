@@ -90,7 +90,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
                           "remaining_days": remaining, "pct": 25})
     exit_info = None
     if state == "B" and t0 is not None:
-        rebuy = t0 + datetime.timedelta(days=E.HOLD_DAYS)
+        rebuy = t0 + datetime.timedelta(days=E.REBUY_DAYS)
         exit_info = {"exit_date": t0.strftime("%Y-%m-%d"),
                      "rebuy_due": rebuy.strftime("%Y-%m-%d"),
                      "remaining_days": max(0, (rebuy - last_date).days)}
@@ -121,7 +121,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
         "param": {"j_low": E.J_LOW, "j_high": E.J_HIGH, "j_cross_from": E.J_CROSS_FROM,
                   "j_cross_to": E.J_CROSS_TO, "rsi_os": E.RSI_OS,
                   "rsi_cross_from": E.RSI_CROSS_FROM, "rsi_cross_to": E.RSI_CROSS_TO,
-                  "x_up": E.X_UP, "y_down": E.Y_DOWN, "hold_days": E.HOLD_DAYS,
+                  "x_up": E.X_UP, "y_down": E.Y_DOWN, "hold_days": E.HOLD_DAYS, "rebuy_days": E.REBUY_DAYS,
                   "slippage_bps": E.SLIPPAGE_BPS, "fin_rate": E.FIN_RATE},
     }
     return snap

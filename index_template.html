@@ -125,7 +125,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <span>数据日期 <b id="h-date">—</b></span>
       <span>生成时间 <b id="h-gen">—</b></span>
       <span>当前策略仓位 <b id="h-pos">—</b></span>
-      <span>策略版本 <b>v7.7</b></span>
+      <span>策略版本 <b>v7.9</b></span>
     </div>
   </header>
 
@@ -260,9 +260,9 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <div class="detail-body">
         <ul class="rule">
           <li><b>超卖买点</b>＝2-of-4：周线 J&lt;1 / 跌破布林下轨 / 近 63 日跌幅≥20% / 周线 RSI&lt;35，任意 2 个 → 加仓至 125%（再触发至 150%）；抄底胜率按含滑点成交价 FIFO 配对。</li>
-          <li><b>A 态清仓</b>＝超买三维极值：J&gt;95 且 触及/突破上轨 且 up63≥20% → 离场 0%；离场后 60 自然日强制回补。</li>
+          <li><b>A 态清仓</b>＝超买三维极值：J&gt;95 且 触及/突破上轨 且 up63≥20% → 离场 0%；离场后出现超卖信号可提前回补，最迟 90 自然日强制回补。</li>
           <li><b>临时仓卖出</b>＝动能消失确认（任一）：J 从&gt;90跌破80 / RSI 从&gt;70跌破65 / 10日顶背离（收盘创新高且日线 RSI 未新高）；每档 25% 独立 60 自然日到期强制卖出。</li>
-          <li><b>执行口径（v7.7）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
+          <li><b>执行口径（v7.9）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
           <li><b>情绪温度计算法</b>：0.4×J(截断0-100) + 0.4×周线RSI + 0.2×动量分(100+dn63×3 截断0-100)，仅作直观参考，不参与任何买卖信号。</li>
           <li><b>过拟合体检</b>：8 参数敏感性（除 X_UP 外均参数平原）+ walk-forward 三区间夏普 0.45/0.56/0.75，见仓库 backtest/sensitivity.json；PBO/Deflated Sharpe 未实现。</li>
         </ul>
@@ -319,13 +319,13 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
   } else if (S.oversold_now && S.pos < 150) {
     setAction("act-buy", "今天可以加仓抄底", "市场跌过头了（4 个恐慌信号里已出现 ≥2 个），现在出手，把仓位加到 " + (S.pos>=125?"150%":"125%") + "。", "加仓部分最迟 60 个自然日内卖出（动能消失信号可提前卖）。" + actionMeta());
   } else if (S.state === "A" && S.overbought_now) {
-    setAction("act-sell", "涨太多了，建议清仓落袋为安", "价格涨过布林上轨、J 值进入超买极值、短期涨幅已大——3 个过热信号同时出现，先全部卖出锁定利润。", "空仓后最迟 60 个自然日需买回，出现超卖信号可提前回补。" + actionMeta());
+    setAction("act-sell", "涨太多了，建议清仓落袋为安", "价格涨过布林上轨、J 值进入超买极值、短期涨幅已大——3 个过热信号同时出现，先全部卖出锁定利润。", "空仓后最迟 90 个自然日需买回，出现超卖信号可提前回补。" + actionMeta());
   } else if (S.pos > 100 && S.momentum_lost_now) {
     setAction("act-sell", "把之前抄底加的钱卖掉，回到满仓", "价格创新高但上涨的劲头已经减弱（动能消失/顶背离），见好就收，只卖加仓部分。", "卖完回到 100% 底仓，底仓继续拿着。" + actionMeta());
   } else if (S.pos > 100) {
     setAction("act-hold", "继续持有加仓部分，等卖点", "市场还没给出卖出信号（动能未消失、未满 60 天），加仓部分继续持有，等「动能消失」或到期再卖。", "倒计时：见下方折叠区「为什么今天这么说」。" + actionMeta());
   } else if (S.state === "B") {
-    setAction("act-hold", "空仓等待，别急着买", "上一轮涨太多已清仓落袋。现在等两种信号：超卖抄底信号（提前回补）或 60 天到期强制买回。", "回补后再操作，今天不动。" + actionMeta());
+    setAction("act-hold", "空仓等待，别急着买", "上一轮涨太多已清仓落袋。现在等两种信号：超卖抄底信号（提前回补）或 90 天到期强制买回。", "回补后再操作，今天不动。" + actionMeta());
   } else {
     setAction("act-hold", "继续满仓持有，今天不用动", "没有出现买入或卖出信号，拿着底仓等就行，不用天天操作。", "出现「加仓抄底」或「清仓落袋」提示再动。" + actionMeta());
   }
