@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>红利低波 · 情绪极值策略监控</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script id="PAYLOAD" type="application/json">__PAYLOAD__</script>
+<style>
+  :root{
+    --bg:#F3F7FC; --card:#FFFFFF; --line:#DDE8F4; --line2:#EAF1F9;
+    --txt:#16324F; --sub:#5B7BA3; --dim:#8AA3C0;
+    --up:#E0443C; --down:#16A34A; --warn:#D97706; --blue:#2B6CB0; --blue-l:#EAF2FB;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;line-height:1.6;padding:0 0 40px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+  header{padding:28px 0 18px;border-bottom:1px solid var(--line);margin-bottom:22px}
+  .brand{font-size:13px;color:var(--sub);letter-spacing:2px;margin-bottom:6px}
+  h1{font-size:24px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--down);display:inline-block}
+  .meta{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12.5px;color:var(--sub)}
+  .meta b{color:var(--txt);font-weight:600}
+  .badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+  .b-state{background:var(--blue-l);color:var(--blue);border-color:#C4DCF3}
+  .b-warn{background:#FEF6E3;color:#B45309;border-color:#F3DEA7}
+  .b-danger{background:#FDEEEC;color:#C53030;border-color:#F5C6C2}
+  .b-ok{background:#E9F8F0;color:#15803D;border-color:#BFE9D0}
+  section{margin-bottom:24px}
+  .sec-t{font-size:15px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .sec-t::before{content:"";width:4px;height:16px;background:var(--blue);border-radius:2px;display:inline-block}
+  .grid{display:grid;gap:14px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  #sig-box{grid-column:1/-1}
+  @media(max-width:760px){.g3,.g4{grid-template-columns:1fr 1fr}.g4 .span2{grid-column:span 2}}
+  @media(max-width:480px){.g3,.g4{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .kpi .lab{font-size:12px;color:var(--sub);margin-bottom:4px}
+  .kpi .val{font-size:26px;font-weight:800;letter-spacing:.5px}
+  .kpi .val small{font-size:13px;font-weight:500;color:var(--sub)}
+  .kpi .desc{font-size:11.5px;color:var(--dim);margin-top:4px}
+  .sig-card{border-left:3px solid var(--blue)}
+  .sig-buy{border-left:3px solid var(--up);background:linear-gradient(135deg,rgba(224,68,60,.05),rgba(255,255,255,0))}
+  .sig-sell{border-left:3px solid var(--down);background:linear-gradient(135deg,rgba(22,163,74,.05),rgba(255,255,255,0))}
+  .sig-hold{border-left:3px solid var(--warn)}
+  .sig-t{font-size:17px;font-weight:800;margin-bottom:6px}
+  .sig-d{font-size:13px;color:var(--sub)}
+  .sig-d b{color:var(--txt)}
+  .cond{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
+  .cond:last-child{border-bottom:none}
+  .cond .k{color:var(--sub)}
+  .cond .v{font-weight:600}
+  .ok{color:var(--down)} .no{color:var(--up)} .near{color:var(--warn)}
+  .bar{height:6px;background:var(--line2);border-radius:3px;overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;border-radius:3px;background:var(--warn)}
+  .bar i.danger{background:var(--up)} .bar i.ok{background:var(--down)}
+  .leg{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .leg:last-child{border-bottom:none}
+  .leg .dt{font-size:13px;min-width:150px}
+  .leg .dt b{display:block;font-size:12px;color:var(--sub);font-weight:500}
+  .leg .cnt{font-size:22px;font-weight:800;min-width:110px}
+  .leg .cnt small{font-size:12px;font-weight:500;color:var(--sub)}
+  .leg .grow{flex:1;min-width:140px}
+  .chart{width:100%;height:340px}
+  .chart-sm{width:100%;height:210px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{color:var(--sub);text-align:left;font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+  td:nth-child(2){font-weight:700}
+  .buy{color:var(--up)} .sell{color:var(--down)}
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+  .rule{font-size:13px;color:var(--sub)}
+  .rule b{color:var(--txt)}
+  .rule li{margin:6px 0 6px 16px}
+  footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--dim);text-align:center}
+  .pill-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .pill{font-size:11.5px;color:var(--sub);border:1px solid var(--line);padding:2px 10px;border-radius:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">H20269 中证红利低波动全收益指数</div>
+    <h1>红利低波 · 情绪极值策略监控 <span class="dot"></span><span id="h-state" class="badge">…</span></h1>
+    <div class="meta">
+      <span>数据日期 <b id="h-date">—</b></span>
+      <span>生成时间 <b id="h-gen">—</b></span>
+      <span>当前仓位 <b id="h-pos">—</b></span>
+      <span>策略版本 <b>v7.6</b></span>
+    </div>
+  </header>
+
+  <!-- 今日信号 -->
+  <section>
+    <div class="sec-t">今日信号</div>
+    <div class="grid g4">
+      <div class="kpi"><div class="lab">最新收盘</div><div class="val" id="k-close">—</div><div class="desc" id="k-close-d">—</div></div>
+      <div class="kpi"><div class="lab">周线 KDJ · J 值</div><div class="val" id="k-wj" style="font-size:22px">—</div><div class="desc">超卖&lt;1 / 超买&gt;95 / 动能消失&gt;90跌破80</div></div>
+      <div class="kpi"><div class="lab">周线 RSI(14)</div><div class="val" id="k-wrsi" style="font-size:22px">—</div><div class="desc">合理区间 35-70 · 超卖&lt;35 · 动能消失&gt;70跌破65</div></div>
+      <div class="kpi"><div class="lab">近63日动量</div><div class="val" id="k-mom" style="font-size:22px">—</div><div class="desc">63日涨幅 up63 / 跌幅 dn63</div></div>
+      <div class="kpi" id="sig-box"><div class="lab">信号结论</div><div class="sig-t" id="k-sig">—</div><div class="sig-d" id="k-sig-d">—</div></div>
+    </div>
+  </section>
+
+  <!-- 触发缺口 -->
+  <section>
+    <div class="sec-t">买卖点触发条件 · 当前距离</div>
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="card sig-buy">
+        <div style="font-size:14px;font-weight:700;color:var(--up);margin-bottom:8px">超卖共振（买点·加仓至125/150%）＝ 2-of-4：J&lt;1 / 跌破布林下轨 / 近63日跌幅≥20% / 周线RSI&lt;35 任意2个</div>
+        <div id="os-conds"></div>
+        <div style="margin-top:10px;font-size:13px" id="os-gap"></div>
+      </div>
+      <div class="card sig-sell">
+        <div style="font-size:14px;font-weight:700;color:var(--down);margin-bottom:8px">超买极值（卖点·常态仓清仓）＝ J&gt;95 × 触及/突破上轨 × 近63日涨幅≥20%</div>
+        <div id="ob-conds"></div>
+        <div style="margin-top:10px;font-size:13px" id="ob-gap"></div>
+      </div>
+    </div>
+    <div class="card sig-hold" style="margin-top:14px">
+      <div style="font-size:14px;font-weight:700;color:var(--warn);margin-bottom:8px">动能消失（卖点·临时仓125/150%了结）＝ 任一触发：J 从&gt;90跌破80 / RSI 从&gt;70跌破65 / 10日顶背离（收盘创新高且日线RSI未新高）</div>
+      <div id="ml-conds"></div>
+      <div style="margin-top:10px;font-size:13px" id="ml-gap"></div>
+    </div>
+    <style>@media(max-width:760px){.grid{grid-template-columns:1fr !important}}</style>
+  </section>
+
+  <!-- 仓位与倒计时 -->
+  <section>
+    <div class="sec-t">仓位与 60 自然日倒计时</div>
+    <div class="grid g3">
+      <div class="kpi"><div class="lab">当前仓位</div><div class="val" id="k-pos2">—</div><div class="desc" id="k-pos2-d">—</div></div>
+      <div class="kpi"><div class="lab">状态机</div><div class="val" style="font-size:22px" id="k-state">—</div><div class="desc">A 常态100% · B 离场0% · C 125% · D 150%</div></div>
+      <div class="kpi"><div class="lab">超配融资</div><div class="val" id="k-lev" style="font-size:22px">—</div><div class="desc">125%/150% 隐含 25%/50% 融资</div></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div style="font-size:13px;color:var(--sub);margin-bottom:4px">临时加仓档（每档 25%）：按<b>动能消失确认</b>了结（J跌破80 / RSI跌破65 / 10日顶背离，任一触发即卖）；60 个自然日内未了结则到期强制卖出</div>
+      <div id="legs"></div>
+    </div>
+    <div class="card" style="margin-top:14px" id="exit-card" hidden>
+      <div style="font-size:13px;color:var(--sub);margin-bottom:4px">离场状态（B）· 60 个自然日内必须回补</div>
+      <div id="exit-info"></div>
+    </div>
+  </section>
+
+  <!-- 策略详情 -->
+  <section>
+    <div class="sec-t">策略详情 · 10 年回测（2016-09-08 ~ 2026-09-07）</div>
+    <div class="grid g4" style="margin-bottom:14px">
+      <div class="kpi"><div class="lab">策略总收益</div><div class="val" style="color:var(--up)" id="r-total">—</div><div class="desc">买入持有 <b id="r-total-bh">—</b></div></div>
+      <div class="kpi"><div class="lab">夏普比率</div><div class="val" id="r-sharpe">—</div><div class="desc">策略 vs 买入持有 <b id="r-sharpe-bh">—</b></div></div>
+      <div class="kpi"><div class="lab">最大回撤</div><div class="val" style="color:var(--down)" id="r-mdd">—</div><div class="desc">买入持有 <b id="r-mdd-bh">—</b></div></div>
+      <div class="kpi"><div class="lab">交易次数</div><div class="val" id="r-trades">—</div><div class="desc">累计费用 <b id="r-fee">—</b> 元</div></div>
+    </div>
+    <div class="card"><div id="nav-chart" class="chart"></div></div>
+    <div class="card" style="margin-top:14px"><div id="dd-chart" class="chart-sm"></div></div>
+    <div class="card" style="margin-top:14px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:10px">历史买卖点明细（全期 <span id="tr-count">—</span> 笔）</div>
+      <div class="tbl-wrap">
+        <table id="trade-tbl"></table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:4px">超卖抄底胜率（<span id="os-total">—</span> 档 · 每档 25% 仓位）</div>
+      <div style="font-size:12px;color:var(--sub);margin-bottom:10px">口径：每次超卖 2-of-4 共振触发的抄底加仓档，与它最终被卖出（动能消失 / 到期强制）的买入-卖出差价，按 FIFO 配对</div>
+      <div class="grid g4" style="margin-bottom:12px">
+        <div class="kpi"><div class="lab">抄底胜率</div><div class="val" style="color:var(--down)" id="os-wr">—</div><div class="desc"><span id="os-wl">—</span></div></div>
+        <div class="kpi"><div class="lab">平均单档收益</div><div class="val" style="font-size:22px" id="os-avg">—</div><div class="desc">盈利档 <b id="os-avgw">—</b> · 亏损档 <b id="os-avgl">—</b></div></div>
+        <div class="kpi"><div class="lab">最大盈利档</div><div class="val" style="font-size:22px;color:var(--up)" id="os-max">—</div><div class="desc" id="os-max-d">—</div></div>
+        <div class="kpi"><div class="lab">最大亏损档</div><div class="val" style="font-size:22px;color:var(--down)" id="os-min">—</div><div class="desc" id="os-min-d">—</div></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--sub);margin-bottom:6px">按买入年份拆分</div>
+          <div class="tbl-wrap"><table id="os-year-tbl"></table></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--sub);margin-bottom:6px">按卖出原因分组</div>
+          <div class="tbl-wrap"><table id="os-reason-tbl"></table></div>
+        </div>
+      </div>
+      <style>@media(max-width:760px){#os-year-tbl,#os-reason-tbl{font-size:12px}.grid[style*="1fr 1fr"]{grid-template-columns:1fr !important}.grid[style*="1fr 1fr"]>div{min-width:0}.grid[style*="1fr 1fr"] .tbl-wrap{max-width:100%}}</style>
+    </div>
+  </section>
+
+  <!-- 策略说明 -->
+  <section>
+    <div class="sec-t">策略说明</div>
+    <div class="grid g3">
+      <div class="card">
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--blue)">① 情绪极值定义（买入 2-of-4 / 清仓三维）</div>
+        <ul class="rule">
+          <li><b>超卖（买点）</b>：周线 J &lt; 1 / 跌破布林下轨 / 近 63 日跌幅 ≥ 20% / 周线 RSI &lt; 35，<b>任意 2 个满足即共振</b>，加仓至 125%（再触发至 150%）</li>
+          <li><b>超买（常态仓清仓）</b>：周线 J &gt; 95 且 触及/突破布林上轨 且 近 63 日涨幅 ≥ 20%，三维共振才清仓离场</li>
+          <li>技术指标、波动通道、短期动量与情绪维度相互确认，过滤假信号</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--warn)">② 状态机（四态 + 动能消失了结）</div>
+        <ul class="rule">
+          <li><b>A(100%)</b>：超卖 2-of-4 → 加仓 125%；超买三维极值 → 清仓离场 0%</li>
+          <li><b>B(0%)</b>：超卖 2-of-4 → 回补并加仓 125%；满 60 自然日 → 强制回补 100%</li>
+          <li><b>C(125%)</b>：再次超卖 2-of-4 → 加仓至 150%；<b>动能消失任一（J跌破80 / RSI跌破65 / 10日顶背离）→ 了结全部临时仓回 100%</b></li>
+          <li><b>D(150%)</b>：动能消失任一 → 了结全部临时仓回 100%；最早一档满 60 自然日 → 逐档卖出</li>
+          <li>顶背离：10 日内收盘价创新高，但日线 RSI(14) 未同步创新高（动能耗尽）</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--down)">③ 60 自然日纪律与参数</div>
+        <ul class="rule">
+          <li>每笔临时加仓（25%）<b>60 个自然日到期</b>，未了结则到期强制卖出；离场后 60 自然日内必须回补</li>
+          <li>参数：周线 J&lt;1 / &gt;95；动能消失 J&gt;90 跌破 80、RSI&gt;70 跌破 65；周线 RSI(14) 合理 35-70、&lt;35 超卖；布林 20 日 2σ；63 日动量 ±20%；费用单边万1最低5元</li>
+          <li>回测：<b>+328.5% / 夏普 0.97 / 回撤 −27.6%</b>（买入持有 +132.1% / 0.61 / −27.5%）· 43 笔 · 费用 481 元</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    数据来源：中证指数官网（H20269/H30269 官方日度行情）· 信号由 v7.6 状态机在每日收盘后计算 · 回测基于 10 年全收益指数<br>
+    本页面仅供策略验证与监控参考，不构成投资建议。125%/150% 超配隐含融资，实际执行需评估融资成本。
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var D = null;
+  try { D = JSON.parse(document.getElementById("PAYLOAD").textContent); } catch(e) {}
+  if (!D || !D.snapshot) { document.body.insertAdjacentHTML("afterbegin", '<div style="padding:20px;color:#E0443C">数据注入失败</div>'); return; }
+  var S = D.snapshot, BT = D.backtest;
+  var fmt = function(x, n){ n = n==null ? 2 : n; return Number(x).toLocaleString("zh-CN", {minimumFractionDigits:n, maximumFractionDigits:n}); };
+  var pct = function(x){ return (x>0?"+":"") + fmt(x,1) + "%"; };
+
+  // ===== header =====
+  var stateMap = {"A":"A · 常态满仓","B":"B · 离场等待回补","C":"C · 125% 超配","D":"D · 150% 超配"};
+  document.getElementById("h-state").textContent = stateMap[S.state] || S.state;
+  document.getElementById("h-state").className = "badge " + (S.state=="B"?"b-danger":(S.pos>100?"b-warn":"b-ok"));
+  document.getElementById("h-date").textContent = S.data_date;
+  document.getElementById("h-gen").textContent = S.generated_at;
+  document.getElementById("h-pos").textContent = S.pos + "%";
+
+  // ===== 今日信号 =====
+  document.getElementById("k-close").innerHTML = fmt(S.close) + " <small>H20269</small>";
+  document.getElementById("k-close-d").textContent = "MA200 " + fmt(S.ma200,0) + " · 布林上/下 " + fmt(S.upper,0) + " / " + fmt(S.lower,0);
+  var wjEl = document.getElementById("k-wj");
+  wjEl.textContent = fmt(S.wj,1);
+  wjEl.style.color = S.wj < 1 ? "#E0443C" : (S.wj > 95 ? "#16A34A" : "#16324F");
+  var wrsiEl = document.getElementById("k-wrsi");
+  wrsiEl.textContent = fmt(S.wrsi,1);
+  wrsiEl.style.color = S.wrsi < 35 ? "#E0443C" : (S.wrsi > 70 ? "#16A34A" : "#16324F");
+  document.getElementById("k-mom").innerHTML = pct(S.up63) + " / " + pct(S.dn63);
+
+  var sig = document.getElementById("k-sig"), sigd = document.getElementById("k-sig-d"), sigcard = document.getElementById("sig-box");
+  if (S.oversold_now && (S.state=="A"||S.state=="C"||S.state=="B")) {
+    sig.textContent = "今日触发超卖共振(2-of-4) → 可加仓";
+    sigd.innerHTML = "周线 J=" + fmt(S.wj,1) + "、布林下轨、63日跌幅 " + pct(S.dn63) + "、周线RSI=" + fmt(S.wrsi,1) + " 中已有至少 2 个满足。" + (S.state=="B" ? "离场状态：直接回补并加仓至 125%。" : (S.state=="C" ? "已有 125% 仓：再次共振，加仓至 150%。" : "当前常态满仓：加仓至 125%（隐含 25% 融资）。")) + " 加仓后按动能消失确认了结（J跌破80 / RSI跌破65 / 10日顶背离），最迟 60 个自然日。";
+  } else if (S.overbought_now && S.state=="A") {
+    sig.textContent = "今日触发超买三维极值 → 清仓离场";
+    sigd.innerHTML = "周线 J=" + fmt(S.wj,1) + " 进入超买极值，价格触及/突破布林上轨且 63 日涨幅 " + pct(S.up63) + "。清仓离场至 0%，60 个自然日内必须回补。";
+  } else if (S.momentum_lost_now && S.pos > 100) {
+    sig.textContent = "今日触发动能消失 → 了结临时仓回 100%";
+    sigd.innerHTML = (S.ml_gap && S.ml_gap.j_cross_ok ? "周线 J 已从 &gt;90 跌破 80（当前 " + fmt(S.wj,1) + "）。" : "") +
+      (S.ml_gap && S.ml_gap.rsi_cross_ok ? "周线 RSI 已从 &gt;70 跌破 65（当前 " + fmt(S.wrsi,1) + "）。" : "") +
+      (S.ml_gap && S.ml_gap.diverg_ok ? "10 日顶背离：收盘创新高但日线 RSI 未新高。" : "") + " 卖出全部临时仓，回到 100% 底仓。";
+  } else if (S.pos > 100) {
+    sig.textContent = "持有临时仓 · 等待动能消失卖点";
+    sigd.innerHTML = "当前 " + (S.pos>125?"150%":"125%") + " 仓位。动能消失任一触发即了结：J 从&gt;90跌破80（当前 " + fmt(S.wj,1) + "）/ RSI 从&gt;70跌破65（当前 " + fmt(S.wrsi,1) + "）/ 10日顶背离。最迟 60 自然日到期卖出。";
+  } else {
+    sig.textContent = "持有观望 · 无共振信号";
+    sigd.innerHTML = "当前状态 " + stateMap[S.state] + "。买点需超卖 2-of-4 共振（J&lt;1 / 下轨 / 跌幅≥20% / RSI&lt;35 任意2个）；常态仓清仓需超买三维极值。";
+  }
+  sigcard.style.borderLeft = (S.oversold_now ? "3px solid #E0443C" : ((S.overbought_now || S.momentum_lost_now) ? "3px solid #16A34A" : "3px solid #D97706"));
+
+  // ===== 触发缺口 =====
+  var osg = S.os_gap, obg = S.ob_gap, mlg = S.ml_gap;
+  function condRow(host, conds){
+    var h = document.getElementById(host); h.innerHTML = "";
+    conds.forEach(function(c){
+      var d = document.createElement("div"); d.className = "cond";
+      d.innerHTML = '<span class="k">' + c.k + '</span><span class="v ' + (c.pass?"ok":(c.near?"near":"no")) + '">' + c.v + ' <small style="color:var(--dim)">阈值 ' + c.t + '</small></span>';
+      h.appendChild(d);
+    });
+  }
+  condRow("os-conds", [
+    {k:"周线 J 值", v:fmt(S.wj,1), t:"< 1", pass:S.wj<1, near:S.wj<10},
+    {k:"价格 vs 布林下轨", v:(S.close<=S.lower?"已触及/跌破":"距下轨还差 " + fmt(osg.band_gap,1) + "%"), t:"触及/跌破下轨", pass:S.close<=S.lower, near:osg.band_gap<3},
+    {k:"近63日跌幅 dn63", v:pct(S.dn63), t:"≤ -20%", pass:S.dn63<=-20, near:osg.dn63_gap<3},
+    {k:"周线 RSI(14)", v:fmt(S.wrsi,1), t:"< 35", pass:S.wrsi<35, near:S.wrsi<40}
+  ]);
+  condRow("ob-conds", [
+    {k:"周线 J 值", v:fmt(S.wj,1), t:"> 95", pass:S.wj>95, near:S.wj>85},
+    {k:"价格 vs 布林上轨", v:(S.close>=S.upper?"已触及/突破":"距上轨还差 " + fmt(obg.band_gap,1) + "%"), t:"触及/突破上轨", pass:S.close>=S.upper, near:obg.band_gap<3},
+    {k:"近63日涨幅 up63", v:pct(S.up63), t:"≥ 20%", pass:S.up63>=20, near:obg.up63_gap<3}
+  ]);
+  condRow("ml-conds", [
+    {k:"周线 J 动能", v:(mlg.j_cross_ok?"已跌破80":"当前 " + fmt(S.wj,1) + "，还需跌 " + fmt(mlg.j_need_drop,1) + " 至 ≤80"), t:"从 >90 跌破 80", pass:mlg.j_cross_ok, near:mlg.j_need_drop<5},
+    {k:"周线 RSI 动能", v:(mlg.rsi_cross_ok?"已跌破65":"当前 " + fmt(S.wrsi,1) + "，还需跌 " + fmt(mlg.rsi_need_drop,1) + " 至 ≤65"), t:"从 >70 跌破 65", pass:mlg.rsi_cross_ok, near:mlg.rsi_need_drop<5},
+    {k:"10日顶背离", v:(mlg.diverg_ok?"已触发":"收盘 " + fmt(S.close,0) + " vs 前10日高 " + fmt(mlg.hi10c,0) + " · 日线RSI " + fmt(S.rsi,1) + " vs 前10日高 " + fmt(mlg.hi10rsi,1)), t:"收盘创新高且日线RSI未新高", pass:mlg.diverg_ok, near:S.close>=mlg.hi10c*0.98}
+  ]);
+  var osGapEl = document.getElementById("os-gap"), obGapEl = document.getElementById("ob-gap"), mlGapEl = document.getElementById("ml-gap");
+  if (!S.oversold_now) {
+    var need = osg.need_drop_pct;
+    osGapEl.innerHTML = (need > 0 ? "<b style='color:#D97706'>距超卖共振还需再跌 " + fmt(need,1) + "%</b>（布林与 63 日动量取较大缺口）" : "<b style='color:#16A34A'>布林与动量已满足，等待 J/RSI 走低</b>") + " · 当前满足 " + [S.wj<1, S.close<=S.lower, S.dn63<=-20, S.wrsi<35].filter(Boolean).length + "/4 个条件，需 ≥2 个";
+  } else osGapEl.innerHTML = "<b style='color:#E0443C'>超卖 2-of-4 已满足，可加仓</b>";
+  if (!S.overbought_now) {
+    var need2 = obg.need_rise_pct;
+    obGapEl.innerHTML = (need2 > 0 ? "<b style='color:#D97706'>距超买三维极值还需再涨 " + fmt(need2,1) + "%</b>" : "<b style='color:#16A34A'>布林与动量已满足，等待周线 J 走高</b>") + (obg.wj_ok ? "" : " · 周线 J 当前 " + fmt(S.wj,1) + "，仍需升至 95 以上");
+  } else obGapEl.innerHTML = "<b style='color:#16A34A'>超买三维已满足，可清仓离场</b>";
+  if (S.pos > 100) {
+    if (!S.momentum_lost_now) {
+      mlGapEl.innerHTML = "<b style='color:#D97706'>动能消失任一触发即了结临时仓</b> · 距 J 跌破80 还需跌 " + fmt(mlg.j_need_drop,1) + " · 距 RSI 跌破65 还需跌 " + fmt(mlg.rsi_need_drop,1) + " · 顶背离待价格创新高且 RSI 未新高";
+    } else mlGapEl.innerHTML = "<b style='color:#16A34A'>动能消失已触发，今日即可了结临时仓回 100%</b>";
+  } else {
+    mlGapEl.innerHTML = "<span style='color:var(--dim)'>当前无临时仓（仓位 " + S.pos + "%），动能消失信号仅在 125%/150% 临时仓持有期生效。</span>";
+  }
+
+  // ===== 仓位与倒计时 =====
+  document.getElementById("k-pos2").textContent = S.pos + "%";
+  document.getElementById("k-pos2-d").textContent = S.pos > 100 ? "超配中，动能消失任一（J跌破80/RSI跌破65/顶背离）即了结，最迟 60 自然日" : (S.pos === 0 ? "已离场，等待回补" : "常态满仓（等同买入持有）");
+  document.getElementById("k-state").textContent = S.state;
+  document.getElementById("k-lev").textContent = S.pos>125 ? "50%" : (S.pos>100 ? "25%" : "0%");
+  var legsEl = document.getElementById("legs");
+  if (S.legs && S.legs.length) {
+    legsEl.innerHTML = "";
+    S.legs.forEach(function(l, idx){
+      var remain = Math.max(0, l.remaining_days);
+      var pctDone = Math.min(100, Math.round((1 - remain/60) * 100));
+      var row = document.createElement("div"); row.className = "leg";
+      row.innerHTML = '<div class="dt"><b>第 ' + (idx+1) + ' 档 · 买入日</b>' + l.buy_date + '</div>' +
+        '<div class="cnt">' + remain + '<small> 个自然日剩余</small></div>' +
+        '<div class="grow"><div style="font-size:12px;color:var(--sub)">到期日 ' + l.due_date + '（60 自然日）· 动能消失可提前了结</div>' +
+        '<div class="bar"><i class="' + (remain<=10?"danger":(remain<=25?"":"ok")) + '" style="width:' + (100-pctDone) + '%"></i></div></div>';
+      legsEl.appendChild(row);
+    });
+  } else {
+    legsEl.innerHTML = '<div style="font-size:13px;color:var(--dim);padding:8px 0">当前无临时加仓档。出现超卖共振加仓后，这里将显示每档的到期倒计时与动能消失卖点。</div>';
+  }
+  if (S.exit) {
+    document.getElementById("exit-card").hidden = false;
+    document.getElementById("exit-info").innerHTML =
+      '<div class="leg"><div class="dt"><b>离场日</b>' + S.exit.exit_date + '</div>' +
+      '<div class="cnt">' + S.exit.remaining_days + '<small> 个自然日</small></div>' +
+      '<div class="grow"><div style="font-size:12px;color:var(--sub)">最迟回补日 ' + S.exit.rebuy_due + '（60 自然日）· 出现超卖 2-of-4 可提前回补并加仓至 125%</div>' +
+      '<div class="bar"><i style="width:' + Math.max(0, 100 - Math.round(S.exit.remaining_days/60*100)) + '%"></i></div></div></div>';
+  }
+
+  // ===== 回测指标 =====
+  var trs = BT.trades;
+  document.getElementById("tr-count").textContent = trs.length;
+  document.getElementById("r-total").textContent = pct((BT.strategy_nav[BT.strategy_nav.length-1]-1)*100);
+  document.getElementById("r-total-bh").textContent = pct((BT.bh_nav[BT.bh_nav.length-1]-1)*100);
+  document.getElementById("r-sharpe").textContent = "0.97";
+  document.getElementById("r-sharpe-bh").textContent = "0.61";
+  var mddS = Math.min.apply(null, BT.strategy_dd), mddB = Math.min.apply(null, BT.bh_dd);
+  document.getElementById("r-mdd").textContent = fmt(mddS*100,1) + "%";
+  document.getElementById("r-mdd-bh").textContent = fmt(mddB*100,1) + "%";
+  document.getElementById("r-trades").textContent = trs.length;
+  document.getElementById("r-fee").textContent = fmt(trs.reduce(function(s,t){return s+t.fee;},0),2);
+
+  // ===== 图表 =====
+  function navValAt(date){
+    var i = BT.dates.indexOf(date);
+    if (i < 0) {
+      for (var j = BT.dates.length-1; j>=0; j--) if (BT.dates[j] <= date) return BT.strategy_nav[j];
+      return BT.strategy_nav[0];
+    }
+    return BT.strategy_nav[i];
+  }
+  function mkChart(id, h){
+    var el = document.getElementById(id);
+    if (typeof echarts === "undefined") { el.innerHTML = '<div style="padding:20px;color:#5B7BA3;font-size:13px">图表库加载失败，请联网后刷新。</div>'; return null; }
+    var c = echarts.init(el, null, {renderer:"canvas"});
+    c.setOption(h);
+    window.addEventListener("resize", function(){ c.resize(); });
+    return c;
+  }
+  mkChart("nav-chart", {
+    backgroundColor:"transparent",
+    tooltip:{trigger:"axis", confine:true, backgroundColor:"#FFFFFF", borderColor:"#DDE8F4", textStyle:{color:"#16324F",fontSize:12},
+      formatter:function(ps){ var s=ps[0].axisValue; for(var i=0;i<ps.length;i++){ s += "<br/>" + ps[i].marker + ps[i].seriesName + ": " + fmt(ps[i].value,3); } return s; }},
+    legend:{data:["策略净值","买入持有","买入点","卖出点"], top:0, textStyle:{color:"#5B7BA3",fontSize:12}, itemWidth:14, itemHeight:8},
+    grid:{left:56, right:18, top:36, bottom:30, containLabel:true},
+    dataZoom:[{type:"inside", start:40, end:100},{type:"slider", start:40, end:100, height:16, bottom:0, borderColor:"#DDE8F4", backgroundColor:"#F6FAFE", fillerColor:"rgba(43,108,176,0.15)", textStyle:{color:"#8AA3C0"}}],
+    xAxis:{type:"category", data:BT.dates, axisLabel:{color:"#8AA3C0", fontSize:11, hideOverlap:true}, axisLine:{lineStyle:{color:"#DDE8F4"}}},
+    yAxis:{type:"value", name:"净值（期初=1）", scale:true, nameTextStyle:{color:"#8AA3C0"}, axisLabel:{color:"#8AA3C0", fontSize:11, formatter:function(v){return v.toFixed(1);}}, splitLine:{lineStyle:{color:"#EEF4FA"}}},
+    series:[
+      {name:"策略净值", type:"line", data:BT.strategy_nav, smooth:true, showSymbol:false, lineStyle:{color:"#E0443C", width:2}, itemStyle:{color:"#E0443C"}},
+      {name:"买入持有", type:"line", data:BT.bh_nav, smooth:true, showSymbol:false, lineStyle:{color:"#2B6CB0", width:1.5, type:"dashed"}, itemStyle:{color:"#2B6CB0"}},
+      {name:"买入点", type:"scatter", data:trs.filter(function(t){return t.action==="买入";}).map(function(t){ return [BT.dates.indexOf(t.date), navValAt(t.date)]; }), symbol:"triangle", symbolSize:9, itemStyle:{color:"#E0443C", borderColor:"#FFFFFF", borderWidth:1}},
+      {name:"卖出点", type:"scatter", data:trs.filter(function(t){return t.action==="卖出";}).map(function(t){ return [BT.dates.indexOf(t.date), navValAt(t.date)]; }), symbol:"diamond", symbolSize:9, itemStyle:{color:"#16A34A", borderColor:"#FFFFFF", borderWidth:1}}
+    ]
+  });
+  mkChart("dd-chart", {
+    backgroundColor:"transparent",
+    tooltip:{trigger:"axis", confine:true, backgroundColor:"#FFFFFF", borderColor:"#DDE8F4", textStyle:{color:"#16324F",fontSize:12}},
+    legend:{data:["策略回撤","买入持有回撤"], top:0, textStyle:{color:"#5B7BA3",fontSize:12}, itemWidth:14, itemHeight:8},
+    grid:{left:56, right:18, top:32, bottom:30, containLabel:true},
+    xAxis:{type:"category", data:BT.dates, axisLabel:{color:"#8AA3C0", fontSize:11, hideOverlap:true}, axisLine:{lineStyle:{color:"#DDE8F4"}}},
+    yAxis:{type:"value", name:"回撤 %", max:0, nameTextStyle:{color:"#8AA3C0"}, axisLabel:{color:"#8AA3C0", fontSize:11, formatter:function(v){return v.toFixed(1)+"%";}}, splitLine:{lineStyle:{color:"#EEF4FA"}}},
+    series:[
+      {name:"策略回撤", type:"line", data:BT.strategy_dd.map(function(v){return +(v*100).toFixed(2);}), showSymbol:false, lineStyle:{color:"#E0443C", width:1.5}, areaStyle:{color:"rgba(224,68,60,0.08)"}, itemStyle:{color:"#E0443C"}},
+      {name:"买入持有回撤", type:"line", data:BT.bh_dd.map(function(v){return +(v*100).toFixed(2);}), showSymbol:false, lineStyle:{color:"#2B6CB0", width:1.2, type:"dashed"}, itemStyle:{color:"#2B6CB0"}}
+    ]
+  });
+
+  // ===== 交易表 =====
+  var tbl = document.getElementById("trade-tbl");
+  var head = "<thead><tr><th>日期</th><th>操作</th><th>收盘价</th><th>触发原因</th><th>成交金额(元)</th><th>费用(元)</th><th>仓位</th></tr></thead><tbody>";
+  var rows = trs.map(function(t){
+    return "<tr><td>" + t.date + "</td><td class='" + (t.action==="买入"?"buy":"sell") + "'>" + t.action + "</td><td>" + fmt(t.close,2) + "</td><td>" + t.reason + "</td><td>" + fmt(t.amount,2) + "</td><td>" + fmt(t.fee,2) + "</td><td>" + t.pos_before + "% → " + t.pos_after + "%</td></tr>";
+  }).join("");
+  tbl.innerHTML = head + rows + "</tbody>";
+
+  // ===== 超卖抄底胜率 =====
+  var OS = S.oversold_stat;
+  if (OS && OS.total > 0) {
+    document.getElementById("os-total").textContent = OS.total;
+    document.getElementById("os-wr").textContent = fmt(OS.winrate,1) + "%";
+    document.getElementById("os-wl").textContent = OS.wins + " 盈 / " + OS.losses + " 亏";
+    document.getElementById("os-avg").textContent = pct(OS.avg_ret);
+    var osc = OS.closed || [];
+    var osW = osc.filter(function(c){ return c.ret > 0; }), osL = osc.filter(function(c){ return c.ret <= 0; });
+    var avgW = osW.length ? osW.reduce(function(s,c){return s+c.ret;},0)/osW.length : 0;
+    var avgL = osL.length ? osL.reduce(function(s,c){return s+c.ret;},0)/osL.length : 0;
+    document.getElementById("os-avgw").textContent = pct(avgW);
+    document.getElementById("os-avgl").textContent = pct(avgL);
+    var mx = osW.reduce(function(a,b){ return b.ret>a.ret ? b : a; }, {ret:-999});
+    var mn = osL.reduce(function(a,b){ return b.ret<a.ret ? b : a; }, {ret:999});
+    document.getElementById("os-max").textContent = pct(mx.ret);
+    document.getElementById("os-max-d").textContent = (mx.buy_date||"") + " 抄底 → " + (mx.sell_date||"") + " 卖出";
+    document.getElementById("os-min").textContent = pct(mn.ret);
+    document.getElementById("os-min-d").textContent = (mn.buy_date||"") + " 抄底 → " + (mn.sell_date||"") + " 卖出";
+    function osTbl(host, rows2, cols){
+      var t = document.getElementById(host);
+      var h = "<thead><tr>" + cols.map(function(c){ return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>";
+      t.innerHTML = h + rows2.map(function(r){ return "<tr>" + r + "</tr>"; }).join("") + "</tbody>";
+    }
+    osTbl("os-year-tbl", (OS.yearly||[]).map(function(g){
+      return "<td>" + g.year + "</td><td>" + g.n + "</td><td>" + g.wins + "/" + g.losses + "</td><td class='" + (g.winrate>=50?"sell":"buy") + "'>" + fmt(g.winrate,1) + "%</td><td class='" + (g.avg_ret>=0?"buy":"sell") + "'>" + pct(g.avg_ret) + "</td>";
+    }), ["年份","档数","盈/亏","胜率","平均收益"]);
+    osTbl("os-reason-tbl", (OS.reason||[]).map(function(g){
+      return "<td>" + g.reason + "</td><td>" + g.n + "</td><td>" + g.wins + "/" + g.losses + "</td><td class='" + (g.winrate>=50?"sell":"buy") + "'>" + fmt(g.winrate,1) + "%</td><td class='" + (g.avg_ret>=0?"buy":"sell") + "'>" + pct(g.avg_ret) + "</td>";
+    }), ["卖出原因","档数","盈/亏","胜率","平均收益"]);
+  } else {
+    document.getElementById("os-total").textContent = "0";
+    document.getElementById("os-wr").textContent = "—";
+    document.getElementById("os-wl").textContent = "暂无已平仓抄底档";
+  }
+})();
+</script>
+</body>
+</html>

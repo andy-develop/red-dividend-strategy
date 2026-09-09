@@ -1,0 +1,41 @@
+name: Daily Update (08:00 CST)
+
+on:
+  schedule:
+    # 北京时间 08:00 = UTC 00:00
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
+
+jobs:
+  update-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install --quiet pandas numpy
+
+      - name: Run daily update (fetch -> signal -> build index.html)
+        run: python3 update.py
+
+      - name: Publish to HSK file hosting (overwrite)
+        run: |
+          npm install -g @aweray/hsk-cli
+          export PATH="$PATH:$(npm prefix -g)/bin"
+          hsk-cli api-key set --scene file_hosting --key "${{ secrets.HSK_API_KEY }}"
+          hsk-cli +host index.html --resource-id "${{ vars.HSK_RESOURCE_ID }}" --format json
+        env:
+          HSK_API_KEY: ${{ secrets.HSK_API_KEY }}
