@@ -88,7 +88,7 @@
       <span>数据日期 <b id="h-date">—</b></span>
       <span>生成时间 <b id="h-gen">—</b></span>
       <span>当前仓位 <b id="h-pos">—</b></span>
-      <span>策略版本 <b>v7.6</b></span>
+      <span>策略版本 <b>v7.7</b></span>
     </div>
   </header>
 
@@ -96,7 +96,7 @@
   <section>
     <div class="sec-t">今日信号</div>
     <div class="grid g4">
-      <div class="kpi"><div class="lab">最新收盘</div><div class="val" id="k-close">—</div><div class="desc" id="k-close-d">—</div></div>
+      <div class="kpi"><div class="lab">全收益收盘 · 信号价</div><div class="val" id="k-close" style="font-size:22px">—</div><div class="desc" id="k-close-d">—</div></div>
       <div class="kpi"><div class="lab">周线 KDJ · J 值</div><div class="val" id="k-wj" style="font-size:22px">—</div><div class="desc">超卖&lt;1 / 超买&gt;95 / 动能消失&gt;90跌破80</div></div>
       <div class="kpi"><div class="lab">周线 RSI(14)</div><div class="val" id="k-wrsi" style="font-size:22px">—</div><div class="desc">合理区间 35-70 · 超卖&lt;35 · 动能消失&gt;70跌破65</div></div>
       <div class="kpi"><div class="lab">近63日动量</div><div class="val" id="k-mom" style="font-size:22px">—</div><div class="desc">63日涨幅 up63 / 跌幅 dn63</div></div>
@@ -133,7 +133,7 @@
     <div class="grid g3">
       <div class="kpi"><div class="lab">当前仓位</div><div class="val" id="k-pos2">—</div><div class="desc" id="k-pos2-d">—</div></div>
       <div class="kpi"><div class="lab">状态机</div><div class="val" style="font-size:22px" id="k-state">—</div><div class="desc">A 常态100% · B 离场0% · C 125% · D 150%</div></div>
-      <div class="kpi"><div class="lab">超配融资</div><div class="val" id="k-lev" style="font-size:22px">—</div><div class="desc">125%/150% 隐含 25%/50% 融资</div></div>
+      <div class="kpi"><div class="lab">超配融资</div><div class="val" id="k-lev" style="font-size:22px">—</div><div class="desc">125%/150% 隐含 25%/50% 融资 · 按年化 7% 计息</div></div>
     </div>
     <div class="card" style="margin-top:14px">
       <div style="font-size:13px;color:var(--sub);margin-bottom:4px">临时加仓档（每档 25%）：按<b>动能消失确认</b>了结（J跌破80 / RSI跌破65 / 10日顶背离，任一触发即卖）；60 个自然日内未了结则到期强制卖出</div>
@@ -147,13 +147,14 @@
 
   <!-- 策略详情 -->
   <section>
-    <div class="sec-t">策略详情 · 10 年回测（2016-09-08 ~ 2026-09-07）</div>
+    <div class="sec-t">策略详情 · 10 年回测（<span id="bt-range">—</span>）</div>
     <div class="grid g4" style="margin-bottom:14px">
       <div class="kpi"><div class="lab">策略总收益</div><div class="val" style="color:var(--up)" id="r-total">—</div><div class="desc">买入持有 <b id="r-total-bh">—</b></div></div>
       <div class="kpi"><div class="lab">夏普比率</div><div class="val" id="r-sharpe">—</div><div class="desc">策略 vs 买入持有 <b id="r-sharpe-bh">—</b></div></div>
       <div class="kpi"><div class="lab">最大回撤</div><div class="val" style="color:var(--down)" id="r-mdd">—</div><div class="desc">买入持有 <b id="r-mdd-bh">—</b></div></div>
-      <div class="kpi"><div class="lab">交易次数</div><div class="val" id="r-trades">—</div><div class="desc">累计费用 <b id="r-fee">—</b> 元</div></div>
+      <div class="kpi"><div class="lab">交易次数</div><div class="val" id="r-trades">—</div><div class="desc">总成本（费+滑点+利息）<b id="r-fee">—</b> 元</div></div>
     </div>
+    <div style="font-size:12px;color:var(--dim);margin-bottom:8px">回测曲线与指标由统一引擎在<b>日频全量</b>数据上计算（每交易日一个点）；页面图表为抽样展示，不参与任何指标计算。数据随每日更新滚动，不冻结。</div>
     <div class="card"><div id="nav-chart" class="chart"></div></div>
     <div class="card" style="margin-top:14px"><div id="dd-chart" class="chart-sm"></div></div>
     <div class="card" style="margin-top:14px">
@@ -164,7 +165,7 @@
     </div>
     <div class="card" style="margin-top:14px">
       <div style="font-size:14px;font-weight:700;margin-bottom:4px">超卖抄底胜率（<span id="os-total">—</span> 档 · 每档 25% 仓位）</div>
-      <div style="font-size:12px;color:var(--sub);margin-bottom:10px">口径：每次超卖 2-of-4 共振触发的抄底加仓档，与它最终被卖出（动能消失 / 到期强制）的买入-卖出差价，按 FIFO 配对</div>
+      <div style="font-size:12px;color:var(--sub);margin-bottom:10px">口径：每次超卖 2-of-4 共振触发的抄底加仓档，与它最终被卖出（动能消失 / 到期强制）的买入-卖出差价（按含滑点成交价），按 FIFO 配对</div>
       <div class="grid g4" style="margin-bottom:12px">
         <div class="kpi"><div class="lab">抄底胜率</div><div class="val" style="color:var(--down)" id="os-wr">—</div><div class="desc"><span id="os-wl">—</span></div></div>
         <div class="kpi"><div class="lab">平均单档收益</div><div class="val" style="font-size:22px" id="os-avg">—</div><div class="desc">盈利档 <b id="os-avgw">—</b> · 亏损档 <b id="os-avgl">—</b></div></div>
@@ -208,18 +209,18 @@
         </ul>
       </div>
       <div class="card">
-        <div style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--down)">③ 60 自然日纪律与参数</div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--down)">③ 60 自然日纪律与执行口径</div>
         <ul class="rule">
           <li>每笔临时加仓（25%）<b>60 个自然日到期</b>，未了结则到期强制卖出；离场后 60 自然日内必须回补</li>
-          <li>参数：周线 J&lt;1 / &gt;95；动能消失 J&gt;90 跌破 80、RSI&gt;70 跌破 65；周线 RSI(14) 合理 35-70、&lt;35 超卖；布林 20 日 2σ；63 日动量 ±20%；费用单边万1最低5元</li>
-          <li>回测：<b>+328.5% / 夏普 0.97 / 回撤 −27.6%</b>（买入持有 +132.1% / 0.61 / −27.5%）· 43 笔 · 费用 481 元</li>
+          <li>参数：周线 J&lt;1 / &gt;95；动能消失 J&gt;90 跌破 80、RSI&gt;70 跌破 65；周线 RSI(14) 合理 35-70、&lt;35 超卖；布林 20 日 2σ；63 日动量 ±20%</li>
+          <li><b>执行口径（v7.7）</b>：信号用<b>价格指数 H30269</b> 计算、收益用<b>全收益 H20269</b>；T 日收盘确认信号 → <b>T+1 收盘成交</b>（数据无开盘价，以 T+1 收盘近似，加<b>单边滑点 5bp</b>）；杠杆部分按<b>年化 7% 按交易日计息</b>；费用单边 max(万1, 5元)</li>
         </ul>
       </div>
     </div>
   </section>
 
   <footer>
-    数据来源：中证指数官网（H20269/H30269 官方日度行情）· 信号由 v7.6 状态机在每日收盘后计算 · 回测基于 10 年全收益指数<br>
+    数据来源：中证指数官网（H20269 全收益 / H30269 价格，官方日度行情）· 信号基于价格指数、收益基于全收益指数 · 由 v7.7 统一引擎在每日收盘后计算（T+1 撮合 · 滑点 5bp · 杠杆年化 7%）<br>
     本页面仅供策略验证与监控参考，不构成投资建议。125%/150% 超配隐含融资，实际执行需评估融资成本。
   </footer>
 </div>
@@ -243,8 +244,8 @@
   document.getElementById("h-pos").textContent = S.pos + "%";
 
   // ===== 今日信号 =====
-  document.getElementById("k-close").innerHTML = fmt(S.close) + " <small>H20269</small>";
-  document.getElementById("k-close-d").textContent = "MA200 " + fmt(S.ma200,0) + " · 布林上/下 " + fmt(S.upper,0) + " / " + fmt(S.lower,0);
+  document.getElementById("k-close").innerHTML = fmt(S.close) + " <small style='font-size:11px'>TR</small> · " + fmt(S.px) + " <small style='font-size:11px'>px</small>";
+  document.getElementById("k-close-d").textContent = "信号价 px " + fmt(S.px,2) + " · MA200 " + fmt(S.ma200,0) + " · 布林上/下 " + fmt(S.upper,0) + " / " + fmt(S.lower,0);
   var wjEl = document.getElementById("k-wj");
   wjEl.textContent = fmt(S.wj,1);
   wjEl.style.color = S.wj < 1 ? "#E0443C" : (S.wj > 95 ? "#16A34A" : "#16324F");
@@ -286,24 +287,24 @@
   }
   condRow("os-conds", [
     {k:"周线 J 值", v:fmt(S.wj,1), t:"< 1", pass:S.wj<1, near:S.wj<10},
-    {k:"价格 vs 布林下轨", v:(S.close<=S.lower?"已触及/跌破":"距下轨还差 " + fmt(osg.band_gap,1) + "%"), t:"触及/跌破下轨", pass:S.close<=S.lower, near:osg.band_gap<3},
+    {k:"价格(px) vs 布林下轨", v:(S.px<=S.lower?"已触及/跌破":"距下轨还差 " + fmt(osg.band_gap,1) + "%"), t:"触及/跌破下轨", pass:S.px<=S.lower, near:osg.band_gap<3},
     {k:"近63日跌幅 dn63", v:pct(S.dn63), t:"≤ -20%", pass:S.dn63<=-20, near:osg.dn63_gap<3},
     {k:"周线 RSI(14)", v:fmt(S.wrsi,1), t:"< 35", pass:S.wrsi<35, near:S.wrsi<40}
   ]);
   condRow("ob-conds", [
     {k:"周线 J 值", v:fmt(S.wj,1), t:"> 95", pass:S.wj>95, near:S.wj>85},
-    {k:"价格 vs 布林上轨", v:(S.close>=S.upper?"已触及/突破":"距上轨还差 " + fmt(obg.band_gap,1) + "%"), t:"触及/突破上轨", pass:S.close>=S.upper, near:obg.band_gap<3},
+    {k:"价格(px) vs 布林上轨", v:(S.px>=S.upper?"已触及/突破":"距上轨还差 " + fmt(obg.band_gap,1) + "%"), t:"触及/突破上轨", pass:S.px>=S.upper, near:obg.band_gap<3},
     {k:"近63日涨幅 up63", v:pct(S.up63), t:"≥ 20%", pass:S.up63>=20, near:obg.up63_gap<3}
   ]);
   condRow("ml-conds", [
     {k:"周线 J 动能", v:(mlg.j_cross_ok?"已跌破80":"当前 " + fmt(S.wj,1) + "，还需跌 " + fmt(mlg.j_need_drop,1) + " 至 ≤80"), t:"从 >90 跌破 80", pass:mlg.j_cross_ok, near:mlg.j_need_drop<5},
     {k:"周线 RSI 动能", v:(mlg.rsi_cross_ok?"已跌破65":"当前 " + fmt(S.wrsi,1) + "，还需跌 " + fmt(mlg.rsi_need_drop,1) + " 至 ≤65"), t:"从 >70 跌破 65", pass:mlg.rsi_cross_ok, near:mlg.rsi_need_drop<5},
-    {k:"10日顶背离", v:(mlg.diverg_ok?"已触发":"收盘 " + fmt(S.close,0) + " vs 前10日高 " + fmt(mlg.hi10c,0) + " · 日线RSI " + fmt(S.rsi,1) + " vs 前10日高 " + fmt(mlg.hi10rsi,1)), t:"收盘创新高且日线RSI未新高", pass:mlg.diverg_ok, near:S.close>=mlg.hi10c*0.98}
+    {k:"10日顶背离", v:(mlg.diverg_ok?"已触发":"信号价 " + fmt(S.px,0) + " vs 前10日高 " + fmt(mlg.hi10c,0) + " · 日线RSI " + fmt(S.rsi,1) + " vs 前10日高 " + fmt(mlg.hi10rsi,1)), t:"收盘创新高且日线RSI未新高", pass:mlg.diverg_ok, near:S.px>=mlg.hi10c*0.98}
   ]);
   var osGapEl = document.getElementById("os-gap"), obGapEl = document.getElementById("ob-gap"), mlGapEl = document.getElementById("ml-gap");
   if (!S.oversold_now) {
     var need = osg.need_drop_pct;
-    osGapEl.innerHTML = (need > 0 ? "<b style='color:#D97706'>距超卖共振还需再跌 " + fmt(need,1) + "%</b>（布林与 63 日动量取较大缺口）" : "<b style='color:#16A34A'>布林与动量已满足，等待 J/RSI 走低</b>") + " · 当前满足 " + [S.wj<1, S.close<=S.lower, S.dn63<=-20, S.wrsi<35].filter(Boolean).length + "/4 个条件，需 ≥2 个";
+    osGapEl.innerHTML = (need > 0 ? "<b style='color:#D97706'>距超卖共振还需再跌 " + fmt(need,1) + "%</b>（布林与 63 日动量取较大缺口）" : "<b style='color:#16A34A'>布林与动量已满足，等待 J/RSI 走低</b>") + " · 当前满足 " + [S.wj<1, S.px<=S.lower, S.dn63<=-20, S.wrsi<35].filter(Boolean).length + "/4 个条件，需 ≥2 个";
   } else osGapEl.innerHTML = "<b style='color:#E0443C'>超卖 2-of-4 已满足，可加仓</b>";
   if (!S.overbought_now) {
     var need2 = obg.need_rise_pct;
@@ -347,18 +348,20 @@
       '<div class="bar"><i style="width:' + Math.max(0, 100 - Math.round(S.exit.remaining_days/60*100)) + '%"></i></div></div></div>';
   }
 
-  // ===== 回测指标 =====
+  // ===== 回测指标（统一引擎日频计算，动态读取） =====
   var trs = BT.trades;
+  var M = BT.metrics || {};
+  document.getElementById("bt-range").textContent = (BT.start||"—") + " ~ " + (BT.end||"—");
   document.getElementById("tr-count").textContent = trs.length;
-  document.getElementById("r-total").textContent = pct((BT.strategy_nav[BT.strategy_nav.length-1]-1)*100);
-  document.getElementById("r-total-bh").textContent = pct((BT.bh_nav[BT.bh_nav.length-1]-1)*100);
-  document.getElementById("r-sharpe").textContent = "0.97";
-  document.getElementById("r-sharpe-bh").textContent = "0.61";
-  var mddS = Math.min.apply(null, BT.strategy_dd), mddB = Math.min.apply(null, BT.bh_dd);
+  document.getElementById("r-total").textContent = pct(((M.total!=null?M.total:(BT.strategy_nav[BT.strategy_nav.length-1]-1))*100));
+  document.getElementById("r-total-bh").textContent = pct(((M.total_bh!=null?M.total_bh:(BT.bh_nav[BT.bh_nav.length-1]-1))*100));
+  document.getElementById("r-sharpe").textContent = (M.sharpe!=null?fmt(M.sharpe,2):"—");
+  document.getElementById("r-sharpe-bh").textContent = (M.sharpe_bh!=null?fmt(M.sharpe_bh,2):"—");
+  var mddS = (M.mdd!=null?M.mdd:Math.min.apply(null, BT.strategy_dd)), mddB = (M.mdd_bh!=null?M.mdd_bh:Math.min.apply(null, BT.bh_dd));
   document.getElementById("r-mdd").textContent = fmt(mddS*100,1) + "%";
   document.getElementById("r-mdd-bh").textContent = fmt(mddB*100,1) + "%";
   document.getElementById("r-trades").textContent = trs.length;
-  document.getElementById("r-fee").textContent = fmt(trs.reduce(function(s,t){return s+t.fee;},0),2);
+  document.getElementById("r-fee").textContent = fmt((M.fee_total!=null?M.fee_total:0),0);
 
   // ===== 图表 =====
   function navValAt(date){
@@ -408,9 +411,9 @@
 
   // ===== 交易表 =====
   var tbl = document.getElementById("trade-tbl");
-  var head = "<thead><tr><th>日期</th><th>操作</th><th>收盘价</th><th>触发原因</th><th>成交金额(元)</th><th>费用(元)</th><th>仓位</th></tr></thead><tbody>";
+  var head = "<thead><tr><th>日期</th><th>操作</th><th>信号价px</th><th>成交价(含滑点)</th><th>触发原因</th><th>仓位</th></tr></thead><tbody>";
   var rows = trs.map(function(t){
-    return "<tr><td>" + t.date + "</td><td class='" + (t.action==="买入"?"buy":"sell") + "'>" + t.action + "</td><td>" + fmt(t.close,2) + "</td><td>" + t.reason + "</td><td>" + fmt(t.amount,2) + "</td><td>" + fmt(t.fee,2) + "</td><td>" + t.pos_before + "% → " + t.pos_after + "%</td></tr>";
+    return "<tr><td>" + t.date + "</td><td class='" + (t.action==="买入"?"buy":"sell") + "'>" + t.action + "</td><td>" + fmt(t.px!=null?t.px:t.close,2) + "</td><td>" + fmt(t.fill!=null?t.fill:t.close,2) + "</td><td>" + t.reason + "</td><td>" + t.pos_before + "% → " + t.pos_after + "%</td></tr>";
   }).join("");
   tbl.innerHTML = head + rows + "</tbody>";
 
