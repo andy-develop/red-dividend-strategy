@@ -26,7 +26,10 @@ J_LOW, J_HIGH = 1.0, 95.0
 J_CROSS_FROM, J_CROSS_TO = 90.0, 80.0
 RSI_OS = 35.0
 RSI_CROSS_FROM, RSI_CROSS_TO = 70.0, 65.0
-X_UP, Y_DOWN = 20.0, 15.0   # 超买63日涨幅阈值20% / 超卖63日跌幅阈值15%（v7.8: 跌幅 20→15，敏感性唯一稳健增益）
+X_UP, Y_DOWN = 20.0, 14.0   # 超买63日涨幅阈值20% / 超卖63日跌幅阈值14%（v7.10: 15→14，walk-forward三段一致增强，夏普0.64/回撤-30.4%）
+Y_ACC = False               # 实验否决：超卖跌幅加"跌幅加速"确认（近10日跌幅 ≥ 近63日跌幅×0.6，全期/WF均变差，保留代码可复现）
+DIV_2OF3 = False            # 实验否决：顶背离扩展 RSI+MACD+量价 三选二（回撤恶化至-34.2%，保留代码可复现）
+DELAY_SELL = 1              # 实验否决：动能消失延迟成交（T+3 回撤-32.2%无增益，默认 T+1）
 MAX_POS = 1.50
 START = "2016-09-08"
 LOOKBACK_DAYS = 4800      # 抓取回看（update.py 用；需覆盖 2014 起指标 warm-up）
@@ -42,10 +45,15 @@ RISK_FREE = 0.0           # 夏普无风险利率
 def get_prices(tr_path, px_path, start=START, end=None):
     """读本地 CSV，合并价格指数与全收益指数（两边都有的日期），日期升序。
     CSV 自 2014 年起；start 只作回测起点标记，不截断（保留 START 前的指标 warm-up，
-    与 v7.6 一致——KDJ/RSI/动量/布林都需要 2014-2016 的预热数据）。"""
+    与 v7.6 一致——KDJ/RSI/动量/布林都需要 2014-2016 的预热数据）。
+    vol（H20269 成交量）保留用于量价背离。"""
     tr = pd.read_csv(tr_path, parse_dates=["date"])
     px = pd.read_csv(px_path, parse_dates=["date"])
     tr = tr[["date", "close"]].rename(columns={"close": "close"})
+    if "trading_vol" in tr.columns:
+        tr["vol"] = tr["trading_vol"]
+    else:
+        tr["vol"] = np.nan
     px = px[["date", "close"]].rename(columns={"close": "px"})
     df = tr.merge(px, on="date", how="inner").sort_values("date").reset_index(drop=True)
     if end is not None:
@@ -91,27 +99,45 @@ def build_signals(df, use_tr=False):
     df["hi63"] = c.rolling(63).max().shift(1)
     df["up63"] = (c / df["lo63"] - 1) * 100
     df["dn63"] = (c / df["hi63"] - 1) * 100
-    # 超卖 2-of-4（px）
+    # 近10日动量（加速确认用）
+    df["hi10"] = c.rolling(10).max().shift(1)
+    df["dn10"] = (c / df["hi10"] - 1) * 100
+    # 超卖 2-of-4（px；v7.10 可选跌幅加速确认：dn63≤-Y_DOWN 且 近10日跌幅≥近63日跌幅×0.6）
+    drop_cond = (df["dn63"] <= -Y_DOWN) & ((df["dn10"] <= df["dn63"] * 0.6) if Y_ACC else True)
     df["oversold"] = ((df["wj"] < J_LOW).astype(int) + (c <= df["lower"]).astype(int)
-                      + (df["dn63"] <= -Y_DOWN).astype(int) + (df["wrsi"] < RSI_OS).astype(int)) >= 2
+                      + drop_cond.astype(int) + (df["wrsi"] < RSI_OS).astype(int)) >= 2
     # A态超买三维极值（px）
     df["overbought"] = (df["wj"] > J_HIGH) & (c >= df["upper"]) & (df["up63"] >= X_UP)
     # 动能消失（px）
     df["hi10c"] = c.rolling(10).max().shift(1)
     df["hi10rsi"] = df["rsi"].rolling(10).max().shift(1)
-    df["diverg"] = (c > df["hi10c"]) & (df["rsi"] < df["hi10rsi"])
+    rsi_diverg = (c > df["hi10c"]) & (df["rsi"] < df["hi10rsi"])
+    if DIV_2OF3:
+        # 扩展顶背离：RSI + MACD柱 + 量价 三选二（v7.10 实验）
+        ema12 = c.ewm(span=12, adjust=False).mean()
+        ema26 = c.ewm(span=26, adjust=False).mean()
+        dif = ema12 - ema26
+        dea = dif.ewm(span=9, adjust=False).mean()
+        df["macd_hist"] = 2 * (dif - dea)
+        df["hi10macd"] = df["macd_hist"].rolling(10).max().shift(1)
+        macd_diverg = (c > df["hi10c"]) & (df["macd_hist"] < df["hi10macd"])
+        vol = df["vol"].fillna(method="ffill")
+        df["vol5"] = vol.rolling(5).mean()
+        vol_diverg = (c > df["hi10c"]) & (df["vol"] < df["vol5"])
+        df["diverg"] = (rsi_diverg.astype(int) + macd_diverg.astype(int) + vol_diverg.astype(int)) >= 2
+    else:
+        df["diverg"] = rsi_diverg
     df["j_cross"] = (df["wj"].rolling(10).max() > J_CROSS_FROM) & (df["wj"] <= J_CROSS_TO)
     df["rsi_cross"] = (df["wrsi"].rolling(10).max() > RSI_CROSS_FROM) & (df["wrsi"] <= RSI_CROSS_TO)
     df["momentum_lost"] = df["j_cross"] | df["rsi_cross"] | df["diverg"]
     return df
 
 
-def replay(df, t1=True, start=START, momentum_confirm="single"):
+def replay(df, t1=True, start=START, delay_sell=DELAY_SELL):
     """T+1 撮合状态机重放（从 start 起输出；start 之前仅作信号预热）。
     信号 T 日收盘确认（用 df 上一行信号），T+1 日收盘成交（滑点计入成交价）。
     t1=False 时信号当日收盘确认、当日收盘成交（仅用于口径归因实验，主回测恒为 True）。
-    momentum_confirm: "single"=动能消失单日触发即卖（v7.8）；
-                      "rebound85"=触发后挂起5个交易日, 期间周线J站上85视为假信号不卖, 否则确认卖出（实验）。
+    delay_sell: 动能消失触发后第 N 个交易日成交（1=T+1 默认；3=延迟到第 3 交易日收盘成交，v7.10 实验）。
     返回 (trades, legs_closed, positions)：
       trades: 每笔 {date, action, px(信号价), fill(成交价含滑点), fee, slippage,
                     pos_before, pos_after, reason, amount}
@@ -155,19 +181,11 @@ def replay(df, t1=True, start=START, momentum_confirm="single"):
             if state == "C" and osig and pos < 1.5:
                 act = ("buy", 1.5, "D", "再次超卖共振·加仓至150%")
             lost_now = prev is not None and bool(prev["momentum_lost"])
-            if momentum_confirm == "rebound85":
-                # 动能消失卖出：触发即挂起，观察 5 个交易日——期间 J 重新站上 85 视为假信号不卖（过滤V型反弹）
-                if lost_now and pend is None:
-                    pend = [i, d]
-                if pend is not None:
-                    if prev is not None and float(prev["wj"]) > 85.0:
-                        pend = None                      # 假信号：J 已回升，不卖
-                    elif i - pend[0] >= 5:
-                        act = ("sell", 1.0, "A", "动能消失·5日未反弹确认·了结临时仓回100%")
-                        pend = None
-            else:
-                if lost_now:
-                    act = ("sell", 1.0, "A", "动能消失·了结临时仓回100%")
+            if lost_now and pend is None:
+                pend = [i - 1, d]          # 记录确认日 T（prev 行索引 i-1）
+            if pend is not None and i - pend[0] >= delay_sell:
+                act = ("sell", 1.0, "A", "动能消失·了结临时仓回100%")
+                pend = None
             if act is None and legs and d >= legs[0][1] + datetime.timedelta(days=HOLD_DAYS):
                 np_ = pos - 0.25
                 act = ("sell", np_, "C" if np_ > 1.0 + 1e-9 else "A", "加仓满60自然日·卖出一档临时仓")
@@ -362,13 +380,13 @@ def overview_stats(trades, closed, df):
     }
 
 
-def run(tr_path, px_path, start=START, end=None, momentum_confirm="single"):
+def run(tr_path, px_path, start=START, end=None, delay_sell=DELAY_SELL):
     """完整回测入口：读数据(含 warm-up) -> 信号 -> 撮合 -> 净值 -> 指标。
     df 保留 START 前数据作指标预热；回测与净值核算从 start 起。"""
     df_all = get_prices(tr_path, px_path, end=end)
     df_all = build_signals(df_all)
     trades, closed, positions, state, pos, legs, t0 = replay(df_all, t1=True, start=start,
-                                                             momentum_confirm=momentum_confirm)
+                                                             delay_sell=delay_sell)
     df = df_all[df_all["date"] >= pd.Timestamp(start)].reset_index(drop=True)
     ec = equity_curve(df, trades, positions, start=start)
     m = metrics(ec, trades)

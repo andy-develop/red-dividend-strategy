@@ -125,7 +125,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <span>数据日期 <b id="h-date">—</b></span>
       <span>生成时间 <b id="h-gen">—</b></span>
       <span>当前策略仓位 <b id="h-pos">—</b></span>
-      <span>策略版本 <b>v7.9</b></span>
+      <span>策略版本 <b>v7.10</b></span>
     </div>
   </header>
 
@@ -259,10 +259,10 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <summary>策略说明与数据口径（给懂行的人）</summary>
       <div class="detail-body">
         <ul class="rule">
-          <li><b>超卖买点</b>＝2-of-4：周线 J&lt;1 / 跌破布林下轨 / 近 63 日跌幅≥20% / 周线 RSI&lt;35，任意 2 个 → 加仓至 125%（再触发至 150%）；抄底胜率按含滑点成交价 FIFO 配对。</li>
+          <li><b>超卖买点</b>＝2-of-4：周线 J&lt;1 / 跌破布林下轨 / 近 63 日跌幅≥14% / 周线 RSI&lt;35，任意 2 个 → 加仓至 125%（再触发至 150%）；抄底胜率按含滑点成交价 FIFO 配对。</li>
           <li><b>A 态清仓</b>＝超买三维极值：J&gt;95 且 触及/突破上轨 且 up63≥20% → 离场 0%；离场后出现超卖信号可提前回补，最迟 90 自然日强制回补。</li>
           <li><b>临时仓卖出</b>＝动能消失确认（任一）：J 从&gt;90跌破80 / RSI 从&gt;70跌破65 / 10日顶背离（收盘创新高且日线 RSI 未新高）；每档 25% 独立 60 自然日到期强制卖出。</li>
-          <li><b>执行口径（v7.9）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
+          <li><b>执行口径（v7.10）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
           <li><b>情绪温度计算法</b>：0.4×J(截断0-100) + 0.4×周线RSI + 0.2×动量分(100+dn63×3 截断0-100)，仅作直观参考，不参与任何买卖信号。</li>
           <li><b>过拟合体检</b>：8 参数敏感性（除 X_UP 外均参数平原）+ walk-forward 三区间夏普 0.45/0.56/0.75，见仓库 backtest/sensitivity.json；PBO/Deflated Sharpe 未实现。</li>
         </ul>
