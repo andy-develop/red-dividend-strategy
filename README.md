@@ -41,12 +41,12 @@ python3 -m http.server 8000  # 本地预览 http://localhost:8000/index.html
 
 ## GitHub Actions 定时发布
 
-仓库需配置：
+仓库需配置（GitHub 仓库 Settings → Secrets and variables → Actions）：
 
 | 配置项 | 值 | 说明 |
 |---|---|---|
 | Secret `HSK_API_KEY` | `ph_key_…` | HSK 文件托管 API Key（用户持有） |
-| Variable `HSK_RESOURCE_ID` | `1788920564682150822` | 覆盖推送同一资源（见下） |
+| Secret `HSK_RESOURCE_ID` | `1788920564682150822` | 覆盖推送同一资源（见下；经 `secrets.HSK_RESOURCE_ID` 引用） |
 
 当前已发布资源：
 
