@@ -36,6 +36,6 @@ jobs:
           npm install -g @aweray/hsk-cli
           export PATH="$PATH:$(npm prefix -g)/bin"
           hsk-cli api-key set --scene file_hosting --key "${{ secrets.HSK_API_KEY }}"
-          hsk-cli +host index.html --resource-id "${{ vars.HSK_RESOURCE_ID }}" --format json
+          hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json
         env:
           HSK_API_KEY: ${{ secrets.HSK_API_KEY }}
