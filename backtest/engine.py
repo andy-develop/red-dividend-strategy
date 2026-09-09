@@ -28,7 +28,7 @@ RSI_CROSS_FROM, RSI_CROSS_TO = 70.0, 65.0
 X_UP, Y_DOWN = 20.0, 20.0
 MAX_POS = 1.50
 START = "2016-09-08"
-LOOKBACK_DAYS = 3800      # 抓取回看（update.py 用）
+LOOKBACK_DAYS = 4800      # 抓取回看（update.py 用；需覆盖 2014 起指标 warm-up）
 SLIPPAGE_BPS = 5          # 单边滑点 5bp = 0.05%
 FEE_RATE = 0.0001         # 万1
 FEE_MIN = 5.0             # 最低 5 元
@@ -39,31 +39,32 @@ RISK_FREE = 0.0           # 夏普无风险利率
 
 # ============ 数据 ============
 def get_prices(tr_path, px_path, start=START, end=None):
-    """读本地 CSV，合并价格指数与全收益指数，仅保留两边都有且 start<=date<=end 的交易日。
-    返回 df: date/close(TR 全收益收盘)/px(价格收盘) 对齐序列（日期升序）。"""
+    """读本地 CSV，合并价格指数与全收益指数（两边都有的日期），日期升序。
+    CSV 自 2014 年起；start 只作回测起点标记，不截断（保留 START 前的指标 warm-up，
+    与 v7.6 一致——KDJ/RSI/动量/布林都需要 2014-2016 的预热数据）。"""
     tr = pd.read_csv(tr_path, parse_dates=["date"])
     px = pd.read_csv(px_path, parse_dates=["date"])
     tr = tr[["date", "close"]].rename(columns={"close": "close"})
     px = px[["date", "close"]].rename(columns={"close": "px"})
     df = tr.merge(px, on="date", how="inner").sort_values("date").reset_index(drop=True)
-    df = df[df["date"] >= pd.Timestamp(start)].reset_index(drop=True)
     if end is not None:
         df = df[df["date"] <= pd.Timestamp(end)].reset_index(drop=True)
     return df
 
 
-def build_signals(df):
-    """信号指标全部在价格指数 px 上计算；close 保留全收益用于收益核算。"""
-    c = df["px"]
+def build_signals(df, use_tr=False):
+    """信号指标全部在价格指数 px 上计算；close 保留全收益用于收益核算。
+    use_tr=True 时信号改用全收益序列（仅用于口径归因实验，主回测恒为 False）。"""
+    c = df["close"] if use_tr else df["px"]
     df["ma20"] = c.rolling(20).mean()
     df["std20"] = c.rolling(20).std(ddof=0)
     df["upper"] = df["ma20"] + 2 * df["std20"]
     df["lower"] = df["ma20"] - 2 * df["std20"]
     df["ma200"] = c.rolling(200).mean()
-    # 周线 KDJ(9,3,3)，ISO 周（px）
+    # 周线 KDJ(9,3,3)，ISO 周（跟随信号序列 c：默认 px，use_tr=True 时为 TR）
     iso = df["date"].dt.isocalendar()
     wk_key = iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
-    wk = df.groupby(wk_key).agg(close=("px", "last"), date=("date", "last")).reset_index(drop=True)
+    wk = df.groupby(wk_key).agg(close=(c.name, "last"), date=("date", "last")).reset_index(drop=True)
     low9 = wk["close"].rolling(9).min()
     high9 = wk["close"].rolling(9).max()
     rsv = ((wk["close"] - low9) / (high9 - low9) * 100).fillna(50.0)
@@ -104,29 +105,39 @@ def build_signals(df):
     return df
 
 
-def replay(df):
-    """T+1 撮合状态机重放。
+def replay(df, t1=True, start=START):
+    """T+1 撮合状态机重放（从 start 起输出；start 之前仅作信号预热）。
     信号 T 日收盘确认（用 df 上一行信号），T+1 日收盘成交（滑点计入成交价）。
+    t1=False 时信号当日收盘确认、当日收盘成交（仅用于口径归因实验，主回测恒为 True）。
     返回 (trades, legs_closed, positions)：
       trades: 每笔 {date, action, px(信号价), fill(成交价含滑点), fee, slippage,
                     pos_before, pos_after, reason, amount}
       legs_closed: 抄底档闭环（FIFO）{buy_date, buy_fill, sell_date, sell_fill, reason, ret}
-      positions: 每日目标仓位 Series（用于净值核算）
+      positions: 每日目标仓位 Series（长度 = df 中 >= start 的行数）
     """
     trades = []
     legs = []          # [(成交索引, 成交日期, 成交价(含滑点))]
     legs_closed = []
-    positions = np.zeros(len(df))
+    start_ts = pd.Timestamp(start)
+    n_out = int((df["date"] >= start_ts).sum())
+    positions = np.zeros(n_out)
+    k = 0
     state, pos = "A", 1.0
     t0 = None          # B 态离场日
     prev = None        # 上一行（T 日）信号
     for i in range(len(df)):
         r = df.iloc[i]
         d = r["date"]
+        if d < start_ts:                # START 之前仅推进 prev（warm-up 信号），不参与撮合
+            prev = r
+            continue
         osig = obsig = lost = False
-        if prev is not None:                      # T 日收盘确认的信号
-            osig = bool(prev["oversold"]); obsig = bool(prev["overbought"])
-            lost = bool(prev["momentum_lost"])
+        if t1:
+            if prev is not None:                      # T 日收盘确认的信号
+                osig = bool(prev["oversold"]); obsig = bool(prev["overbought"])
+                lost = bool(prev["momentum_lost"])
+        else:
+            osig = bool(r["oversold"]); obsig = bool(r["overbought"]); lost = bool(r["momentum_lost"])
         act = None
         if state == "A":
             if osig: act = ("buy", 1.25, "C", "情绪极值超卖共振·加仓至125%")
@@ -147,8 +158,8 @@ def replay(df):
             if act is None and legs and d >= legs[0][1] + datetime.timedelta(days=HOLD_DAYS):
                 np_ = pos - 0.25
                 act = ("sell", np_, "C" if np_ > 1.0 + 1e-9 else "A", "加仓满60自然日·卖出一档临时仓")
-        # 期初建仓：START 首日直接 0 -> 100（无信号，T+1 框架下首日即持仓）
-        if i == 0 and len(trades) == 0:
+        # 期初建仓：回测起点首日直接 0 -> 100（无信号，T+1 框架下首日即持仓）
+        if k == 0 and len(trades) == 0:
             act = ("buy", 1.0, "A", "期初建底仓·满仓100%")
         if act:
             new_pos, new_state = act[1], act[2]
@@ -173,15 +184,17 @@ def replay(df):
                 t0 = None
             if state == "B":
                 t0 = d
-        positions[i] = pos
+        positions[k] = pos
+        k += 1
         prev = r
     return (trades, legs_closed, positions, state, pos, legs, t0)
 
 
-def equity_curve(df, trades, positions, initial=100000.0):
+def equity_curve(df, trades, positions, initial=100000.0, start=START):
     """日频净值核算（全收益 close 计收益，T+1 撮合）。
     份额按信号日收盘价 px 成交（滑点+费用作为显式成本从净值扣除，数学等价）；
     融资成本在持仓日按杠杆部分（pos>1.0）按年化 7% / 252 交易日计提。
+    df 须为 >= start 的回测段（positions 与之对齐）。
     返回 dict: dates/strategy_nav/bh_nav/strategy_dd/bh_dd/pos_pct/costs。"""
     dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
     px = df["px"].values
@@ -297,14 +310,16 @@ def oversold_stats(closed):
 
 
 def run(tr_path, px_path, start=START, end=None):
-    """完整回测入口：读数据 -> 信号 -> 撮合 -> 净值 -> 指标。"""
-    df = get_prices(tr_path, px_path, start, end)
-    df = build_signals(df)
-    trades, closed, positions, state, pos, legs, t0 = replay(df)
-    ec = equity_curve(df, trades, positions)
+    """完整回测入口：读数据(含 warm-up) -> 信号 -> 撮合 -> 净值 -> 指标。
+    df 保留 START 前数据作指标预热；回测与净值核算从 start 起。"""
+    df_all = get_prices(tr_path, px_path, end=end)
+    df_all = build_signals(df_all)
+    trades, closed, positions, state, pos, legs, t0 = replay(df_all, t1=True, start=start)
+    df = df_all[df_all["date"] >= pd.Timestamp(start)].reset_index(drop=True)
+    ec = equity_curve(df, trades, positions, start=start)
     m = metrics(ec, trades)
     m["n_oversold"] = len(closed)
-    return {"df": df, "trades": trades, "closed": closed, "positions": positions,
+    return {"df": df, "df_all": df_all, "trades": trades, "closed": closed, "positions": positions,
             "ec": ec, "metrics": m, "os_stat": oversold_stats(closed),
             "state": state, "pos": pos, "legs": legs, "t0": t0}
 

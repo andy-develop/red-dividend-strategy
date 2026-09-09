@@ -57,7 +57,7 @@ def load_prices():
     dates = sorted(set(tr) & set(px))
     df = pd.DataFrame({"date": pd.to_datetime(dates), "close": [tr[d] for d in dates], "px": [px[d] for d in dates]})
     df = df.sort_values("date").reset_index(drop=True)
-    df = df[df["date"] >= pd.Timestamp(START)].reset_index(drop=True)
+    # 注意：不截断到 START——保留 START 前的指标 warm-up（与 v7.6 一致，见 engine.get_prices 说明）
     return df
 
 
@@ -157,11 +157,12 @@ def render(snap, bt):
 
 def main():
     print("[1/4] 抓取行情...")
-    df = load_prices()
-    print(f"      共 {len(df)} 条，最新 {df['date'].iloc[-1].date()}")
-    print("[2/4] 统一引擎：信号(px) + T+1 撮合 + 净值核算...")
-    df = E.build_signals(df)
-    trades, closed, positions, state, pos, legs, t0 = E.replay(df)
+    df_all = load_prices()
+    print(f"      共 {len(df_all)} 条，最新 {df_all['date'].iloc[-1].date()}")
+    print("[2/4] 统一引擎：信号(px, 含warm-up) + T+1 撮合 + 净值核算...")
+    df_all = E.build_signals(df_all)
+    trades, closed, positions, state, pos, legs, t0 = E.replay(df_all, t1=True, start=E.START)
+    df = df_all[df_all["date"] >= pd.Timestamp(E.START)].reset_index(drop=True)
     ec = E.equity_curve(df, trades, positions)
     m = E.metrics(ec, trades)
     os_stat = E.oversold_stats(closed)
@@ -172,7 +173,7 @@ def main():
         json.dump(bt, f, ensure_ascii=False)
     print(f"      {DATA_OUT} ({len(bt['dates'])} 采样点 / {len(trades)} 笔 / {bt['end']})")
     print("[4/4] 生成 HTML...")
-    snap = build_snapshot(df, state, pos, legs, t0, trades, os_stat)
+    snap = build_snapshot(df_all, state, pos, legs, t0, trades, os_stat)
     html = render(snap, bt)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)

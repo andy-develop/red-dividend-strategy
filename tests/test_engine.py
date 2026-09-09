@@ -105,8 +105,9 @@ class TestReplay(unittest.TestCase):
 class TestEquity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        df = E.build_signals(E.get_prices(TR, PX))
-        trades, closed, positions, *_ = E.replay(df)
+        df_all = E.build_signals(E.get_prices(TR, PX))
+        trades, closed, positions, *_ = E.replay(df_all, t1=True, start=E.START)
+        df = df_all[df_all["date"] >= pd.Timestamp(E.START)].reset_index(drop=True)
         cls.ec = E.equity_curve(df, trades, positions)
         cls.m = E.metrics(cls.ec, trades)
         cls.trades = trades
