@@ -119,6 +119,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 <body>
 <div class="wrap">
   <div id="warn-bar" style="display:none;background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6"></div>
+  <div id="cal-bar" style="display:none;background:#EFF6FF;border:1px solid #3B82F6;color:#1E40AF;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6"></div>
   <header>
     <div class="brand">中证红利低波动全收益指数 · 跟投仪表盘</div>
     <h1>红利低波 · 今天该怎么做 <span id="h-state" class="badge">…</span></h1>
@@ -126,7 +127,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <span>数据日期 <b id="h-date">—</b></span>
       <span>生成时间 <b id="h-gen">—</b></span>
       <span>当前策略仓位 <b id="h-pos">—</b></span>
-      <span>策略版本 <b>v7.11</b></span>
+      <span>策略版本 <b>v7.12</b></span>
     </div>
   </header>
 
@@ -261,10 +262,10 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <summary>策略说明与数据口径（给懂行的人）</summary>
       <div class="detail-body">
         <ul class="rule">
-          <li><b>超卖买点</b>＝2-of-4 × 双重门槛（v7.11）：4 个恐慌信号（周线 J&lt;1 / 跌破布林下轨 / 近 63 日跌幅≥14% / 周线 RSI&lt;35）任意 2 个，<b>且</b> 价格 &lt;250 日线（年线下方才抄底，年线上方超卖=高位回调不执行）<b>且</b> 估值剪刀差（股息率代理−10Y国债）3 年历史分位 ≥50%（&lt;50% 不执行；50-80% 半力=禁加仓至150%）；抄底胜率按含滑点成交价 FIFO 配对。</li>
+          <li><b>超卖买点</b>＝2-of-4 × 双重门槛（v7.12）：4 个恐慌信号（周线 J&lt;1 / 跌破布林下轨 / 近 63 日跌幅≥14% / 周线 RSI&lt;35）任意 2 个，<b>且</b> 价格 &lt;250 日线（年线下方才抄底，年线上方超卖=高位回调不执行）<b>且</b> 估值剪刀差（股息率代理−10Y国债）3 年历史分位 ≥50%（&lt;50% 不执行；50-80% 半力=禁加仓至150%）；抄底胜率按含滑点成交价 FIFO 配对。</li>
           <li><b>A 态清仓</b>＝超买三维极值：J&gt;95 且 触及/突破上轨 且 up63≥20% → 离场 0%；离场后出现超卖信号可提前回补，最迟 90 自然日强制回补。</li>
           <li><b>临时仓卖出</b>＝动能消失确认（任一）：J 从&gt;90跌破80 / RSI 从&gt;70跌破65 / 10日顶背离（收盘创新高且日线 RSI 未新高）；每档 25% 独立 60 自然日到期强制卖出。</li>
-          <li><b>执行口径（v7.11）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
+          <li><b>执行口径（v7.12）</b>：信号用价格指数 H30269 计算、收益用全收益 H20269；T+1 收盘成交（无开盘价近似）+ 单边滑点 5bp；杠杆年化 7% 按交易日计息；费用单边 max(万1, 5元)；年化 252 交易日、夏普无风险利率 0。</li>
           <li><b>情绪温度计算法</b>：0.4×J(截断0-100) + 0.4×周线RSI + 0.2×动量分(100+dn63×3 截断0-100)，仅作直观参考，不参与任何买卖信号。</li>
           <li><b>过拟合体检</b>：8 参数敏感性（除 X_UP 外均参数平原）+ walk-forward 三区间夏普 0.45/0.56/0.75，见仓库 backtest/sensitivity.json；PBO/Deflated Sharpe 未实现。</li>
         </ul>
@@ -321,14 +322,41 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     else h += " · 按" + fmt(cap,0) + "元本金：持有 <b>" + fmt(base,0) + " 元</b>";
     return h;
   }
+  // ===== 交易日历闸门（v7.12）：休市日不喊"今天买"，横幅标注陈旧度 =====
+  var CAL = S.cal || {};
+  var calNote = "";
+  if (CAL.cal_missing) { calNote = "（无交易日历，按工作日近似）"; }
+  else if (!CAL.is_today_trade) {
+    calNote = "今日休市——信号按「下个交易日（" + CAL.next_trade + "）开盘前」执行，不是今天开盘。";
+  }
+  // 数据陈旧横幅：数据日 < 上一交易日（含周末/节假日）时提示
+  var lastTrade = CAL.next_trade && CAL.is_today_trade ? null : CAL.next_trade;
+  var staleDays = 0;
+  if (CAL.cal_missing) {
+    var t0d = new Date(S.data_date + "T00:00:00"), nowd = new Date();
+    staleDays = Math.round((nowd - t0d) / 86400000);
+  }
+  var calBar = document.getElementById("cal-bar");
+  if (calBar) {
+    var parts = [];
+    if (CAL.cal_missing) {
+      if (staleDays > 3) parts.push("数据截至 " + S.data_date + "（" + staleDays + " 天前）");
+    } else if (!CAL.is_today_trade) {
+      parts.push("今日休市，下个交易日 " + CAL.next_trade);
+    }
+    if (parts.length) { calBar.style.display = "block"; calBar.innerHTML = parts.join(" · "); }
+  }
+  var TITLE_OK = CAL.is_today_trade !== false;   // 缺日历默认允许"今天"措辞（周末仍挡）
+  if (!TITLE_OK && CAL.cal_missing && new Date().getDay() !== 0 && new Date().getDay() !== 6) TITLE_OK = true;
+
   if (S.state === "B" && S.oversold_now) {
-    setAction("act-buy", "今天可以加仓抄底", "市场跌过头了（4 个恐慌信号里已出现 ≥2 个），现在出手：回补底仓并加仓到 125%。", "加仓部分最迟 60 个自然日内卖出。" + actionMeta());
+    setAction("act-buy", (TITLE_OK ? "今天可以加仓抄底" : "下个交易日可加仓抄底（今日休市）"), "市场跌过头了（4 个恐慌信号里已出现 ≥2 个），" + (TITLE_OK ? "现在出手" : "下个交易日开盘执行") + "：回补底仓并加仓到 125%。", "加仓部分最迟 60 个自然日内卖出。" + calNote + actionMeta());
   } else if (S.oversold_now && S.pos < 150) {
-    setAction("act-buy", "今天可以加仓抄底", "市场跌过头了（4 个恐慌信号里已出现 ≥2 个），现在出手，把仓位加到 " + (S.pos>=125?"150%":"125%") + "。", "加仓部分最迟 60 个自然日内卖出（动能消失信号可提前卖）。" + actionMeta());
+    setAction("act-buy", (TITLE_OK ? "今天可以加仓抄底" : "下个交易日可加仓抄底（今日休市）"), "市场跌过头了（4 个恐慌信号里已出现 ≥2 个），" + (TITLE_OK ? "现在出手" : "下个交易日开盘执行") + "，把仓位加到 " + (S.pos>=125?"150%":"125%") + "。", "加仓部分最迟 60 个自然日内卖出（动能消失信号可提前卖）。" + calNote + actionMeta());
   } else if (S.state === "A" && S.overbought_now) {
-    setAction("act-sell", "涨太多了，建议清仓落袋为安", "价格涨过布林上轨、J 值进入超买极值、短期涨幅已大——3 个过热信号同时出现，先全部卖出锁定利润。", "空仓后最迟 90 个自然日需买回，出现超卖信号可提前回补。" + actionMeta());
+    setAction("act-sell", (TITLE_OK ? "涨太多了，建议清仓落袋为安" : "下个交易日清仓落袋（今日休市）"), "价格涨过布林上轨、J 值进入超买极值、短期涨幅已大——3 个过热信号同时出现，" + (TITLE_OK ? "先全部卖出" : "下个交易日开盘全部卖出") + "锁定利润。", "空仓后最迟 90 个自然日需买回，出现超卖信号可提前回补。" + calNote + actionMeta());
   } else if (S.pos > 100 && S.momentum_lost_now) {
-    setAction("act-sell", "把之前抄底加的钱卖掉，回到满仓", "价格创新高但上涨的劲头已经减弱（动能消失/顶背离），见好就收，只卖加仓部分。", "卖完回到 100% 底仓，底仓继续拿着。" + actionMeta());
+    setAction("act-sell", (TITLE_OK ? "把之前抄底加的钱卖掉，回到满仓" : "下个交易日卖掉加仓部分（今日休市）"), "价格创新高但上涨的劲头已经减弱（动能消失/顶背离），见好就收，只卖加仓部分。", "卖完回到 100% 底仓，底仓继续拿着。" + calNote + actionMeta());
   } else if (S.pos > 100) {
     setAction("act-hold", "继续持有加仓部分，等卖点", "市场还没给出卖出信号（动能未消失、未满 60 天），加仓部分继续持有，等「动能消失」或到期再卖。", "倒计时：见下方折叠区「为什么今天这么说」。" + actionMeta());
   } else if (S.state === "B") {
@@ -353,7 +381,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
   document.getElementById("g-desc").textContent = desc;
   document.getElementById("g-nums").textContent = "底层指标：周线 J=" + fmt(S.wj,1) + "（<1 恐慌 / >95 贪婪）· 周线 RSI=" + fmt(S.wrsi,1) + " · 近63日自高点 " + pct1(S.dn63) + " · 温度计算法见折叠区";
 
-  // ===== ②b 估值与年线门（v7.11）=====
+  // ===== ②b 估值与年线门（v7.12）=====
   var vr = document.getElementById("val-row");
   if (vr && S.val) {
     var parts = [];
@@ -365,7 +393,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     }
     parts.push(S.val.ma250_ok ? "价格 <b>在年线下方</b> · 允许抄底" : "价格 <b>在年线上方</b> · 高位回调不抄底");
     if (S.val.gate_ok === false) parts.push("今日超卖信号被估值门拦截（分位<50% 不执行）");
-    vr.innerHTML = "抄底门槛（v7.11）：" + parts.join("　·　");
+    vr.innerHTML = "抄底门槛（v7.12）：" + parts.join("　·　");
   }
 
   // ===== ③ 我的仓位 =====
@@ -394,8 +422,8 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
   }
   condRow("os-conds", [
     {k:"周线 J 值", v:fmt(S.wj,1), t:"< 1 = 恐慌", pass:S.wj<1, near:S.wj<10},
-    {k:"价格 vs 布林下轨", v:(S.px<=S.lower?"已触及/跌破":"还差 " + fmt(osg.band_gap,1) + "%"), t:"跌破 = 超跌", pass:S.px<=S.lower, near:osg.band_gap<3},
-    {k:"近63日跌幅", v:pct1(S.dn63), t:"≤ -20% = 超跌", pass:S.dn63<=-20, near:osg.dn63_gap<3},
+    {k:"价格 vs 布林下轨", v:(S.px<=S.lower?"已触及/跌破":"还差 " + fmt(osg.band?osg.band.gap:0,1) + "%"), t:"跌破 = 超跌", pass:S.px<=S.lower, near:osg.band?osg.band.gap<3:false},
+    {k:"近63日跌幅", v:pct1(S.dn63), t:"≤ 14% = 超跌", pass:S.dn63<=-14, near:osg.dn63?osg.dn63.gap<3:false},
     {k:"周线 RSI", v:fmt(S.wrsi,1), t:"< 35 = 恐慌", pass:S.wrsi<35, near:S.wrsi<40}
   ]);
   condRow("ob-conds", [
@@ -409,13 +437,16 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     {k:"10日顶背离", v:(mlg.diverg_ok?"已触发":"信号价 " + fmt(S.px,0) + " vs 前10日高 " + fmt(mlg.hi10c,0)), t:"价新高且RSI未新高", pass:mlg.diverg_ok, near:S.px>=mlg.hi10c*0.98}
   ]);
   var why = document.getElementById("why-text");
-  var nOs = [S.wj<1, S.px<=S.lower, S.dn63<=-20, S.wrsi<35].filter(Boolean).length;
-  why.innerHTML = (S.oversold_now ? "买点信号：<b style='color:#C0392B'>超卖 2-of-4 已共振</b>（" + nOs + "/4 个恐慌信号同时满足）" : "买点：超卖 2-of-4 共振（4 个恐慌信号 ≥2 个）当前满足 <b>" + nOs + "/4</b>") +
-    (osg.need_drop_pct>0 ? " · 距触发还需再跌 <b style='color:#B45309'>" + fmt(osg.need_drop_pct,1) + "%</b>" : " · 已触发") +
+  var nOs = osg.hits !== undefined ? osg.hits : [S.wj<1, S.px<=S.lower, S.dn63<=-14, S.wrsi<35].filter(Boolean).length;
+  why.innerHTML = (S.oversold_now ? "买点信号：<b style='color:#C0392B'>超卖 2-of-4 已共振</b>（" + nOs + "/4 个恐慌信号同时满足）" : "买点：超卖 2-of-4 共振（4 个恐慌信号 ≥2 个）当前满足 <b>" + nOs + "/4</b>，再中 <b style='color:#B45309'>" + Math.max(0,2-nOs) + "</b> 个即触发") +
     "；清仓：超买三维极值" + (S.overbought_now?" <b style='color:#C0392B'>已触发</b>":"（还差 " + fmt(obg.need_rise_pct,1) + "% 涨幅）") +
     "；临时仓卖点：动能消失任一" + (S.momentum_lost_now?" <b style='color:#C0392B'>已触发</b>":"（J还差" + fmt(mlg.j_need_drop,1) + "、RSI还差" + fmt(mlg.rsi_need_drop,1) + "）");
   var osGapEl = document.getElementById("os-gap"), obGapEl = document.getElementById("ob-gap"), mlGapEl = document.getElementById("ml-gap");
-  osGapEl.innerHTML = osg.need_drop_pct>0 ? "买点缺口：布林还差 <b>" + fmt(osg.band_gap,1) + "%</b>、63日动量还差 <b>" + fmt(osg.dn63_gap,1) + "%</b>，取较大者 <b class='" + (osg.need_drop_pct<3?"ok":"warn") + "'>" + fmt(osg.need_drop_pct,1) + "%</b>" : "买点缺口：<b class='ok'>已满足（2-of-4 共振）</b>";
+  osGapEl.innerHTML = "买点缺口（逐条件，2-of-4 再中 <b>" + Math.max(0,2-nOs) + "</b> 个即触发）：布林下轨" + (osg.band&&osg.band.hit?"<b class='ok'>已跌破</b>":"还差 <b>" + fmt(osg.band?osg.band.gap:0,1) + "%</b>") +
+    " · 63日跌幅" + (osg.dn63&&osg.dn63.hit?"<b class='ok'>已满足</b>":"还差 <b>" + fmt(osg.dn63?osg.dn63.gap:0,1) + "%</b>") +
+    " · 周线J" + (osg.wj&&osg.wj.hit?"<b class='ok'>已<1</b>":"当前 " + fmt(S.wj,1)) +
+    " · 周线RSI" + (osg.wrsi&&osg.wrsi.hit?"<b class='ok'>已<35</b>":"当前 " + fmt(S.wrsi,1)) +
+    "<span style='color:var(--dim)'>（大跌会使 J/RSI 随周收盘下探，可能提前触发；63日阈值按明日窗口修正）</span>";
   obGapEl.innerHTML = obg.need_rise_pct>0 ? "清仓缺口：布林还差 <b>" + fmt(obg.band_gap,1) + "%</b>、63日动量还差 <b>" + fmt(obg.up63_gap,1) + "%</b>，取较大者 <b class='" + (obg.need_rise_pct<3?"ok":"warn") + "'>" + fmt(obg.need_rise_pct,1) + "%</b>" : "清仓缺口：<b class='ok'>已满足（三维极值）</b>";
   mlGapEl.innerHTML = S.pos>100
     ? (S.momentum_lost_now ? "临时仓卖点：<b class='ok'>动能消失已触发，可了结</b>" : "临时仓卖点：J 还差 <b>" + fmt(mlg.j_need_drop,1) + "</b>、RSI 还差 <b>" + fmt(mlg.rsi_need_drop,1) + "</b>、顶背离待新高确认；每档 60 自然日到期兜底")

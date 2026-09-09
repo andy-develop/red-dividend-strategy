@@ -55,11 +55,12 @@ def get_prices(tr_path, px_path, start=START, end=None):
     vol（H20269 成交量）保留用于量价背离。"""
     tr = pd.read_csv(tr_path, parse_dates=["date"])
     px = pd.read_csv(px_path, parse_dates=["date"])
-    tr = tr[["date", "close"]].rename(columns={"close": "close"})
+    # 先保留 vol（H20269 成交量），再做列切片——原实现先切片导致 "trading_vol" 恒不在列中
     if "trading_vol" in tr.columns:
         tr["vol"] = tr["trading_vol"]
     else:
         tr["vol"] = np.nan
+    tr = tr[["date", "close", "vol"]].rename(columns={"close": "close"})
     px = px[["date", "close"]].rename(columns={"close": "px"})
     df = tr.merge(px, on="date", how="inner").sort_values("date").reset_index(drop=True)
     if end is not None:
@@ -120,6 +121,10 @@ def build_signals(df, use_tr=False):
         df["spread_pct"] = df["spread"].rolling(win, min_periods=int(win * 0.8)).rank(pct=True)
         df["os_half"] = df["spread_pct"].between(0.5, 0.8)
     else:
+        # 【v7.12】cn10y 缺失时补齐全部估值字段（此前只补 spread 三件套，
+        # 导致 update.py 读 div_proxy/y10 时 KeyError，job 直接红）
+        df["div_proxy"] = (df["close"] / df["px"] / (df["close"].shift(252) / df["px"].shift(252)) - 1) * 100
+        df["y10"] = np.nan
         df["spread"] = df["spread_pct"] = np.nan
         df["os_half"] = False
     # 超卖 2-of-4（px；v7.10 可选跌幅加速确认：dn63≤-Y_DOWN 且 近10日跌幅≥近63日跌幅×0.6）
@@ -254,15 +259,17 @@ def replay(df, t1=True, start=START, delay_sell=DELAY_SELL):
 
 def equity_curve(df, trades, positions, initial=100000.0, start=START):
     """日频净值核算（全收益 close 计收益，T+1 撮合）。
-    份额按信号日收盘价 px 成交（滑点+费用作为显式成本从净值扣除，数学等价）；
-    融资成本在持仓日按杠杆部分（pos>1.0）按年化 7% / 252 交易日计提。
+    【v7.12 地基修正】持仓市值按全收益指数再投计价：q 为 TR 归一份额
+    （买入 q += buy_amt/(px*tr)，每日市值 = q * px * tr），使策略端吃到分红再投，
+    与买入持有（bh_nav 用 TR）口径一致。此前用 px 计价漏掉全部分红，策略收益系统性低估。
+    成交价仍用 px（可交易价格）；滑点+费用+融资成本作为显式成本从净值扣除。
     df 须为 >= start 的回测段（positions 与之对齐）。
     返回 dict: dates/strategy_nav/bh_nav/strategy_dd/bh_dd/pos_pct/costs。"""
     dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
-    px = df["px"].values
+    tr = df["close"].values          # 全收益指数（收益口径）
     n = len(df)
     cash = initial
-    shares = 0.0
+    q = 0.0            # TR 归一份额：市值 = q * tr（分红再投计入，见下）
     nav_ts = np.zeros(n)
     costs_ts = np.zeros(n)
     pos_pct = np.zeros(n)
@@ -270,36 +277,37 @@ def equity_curve(df, trades, positions, initial=100000.0, start=START):
     s = SLIPPAGE_BPS / 1e4
     for i in range(n):
         dstr = dates[i]
-        px_close = px[i]
+        tr_i = tr[i]
+        hold_val = q * tr_i           # 持仓市值：买入额按全收益指数增长率增值（含分红再投）
         t = t_by_date.get(dstr)
         if t is not None:
             if t["action"] == "买入":
-                cur_val = cash + shares * px_close
+                cur_val = cash + hold_val
                 target_val = cur_val * (t["pos_after"] / 100.0)
-                buy_amt = max(0.0, target_val - shares * px_close)
+                buy_amt = max(0.0, target_val - hold_val)
                 if buy_amt > 0:
                     fee = max(buy_amt * FEE_RATE, FEE_MIN)
                     slip = buy_amt * s
-                    shares += buy_amt / px_close
+                    q += buy_amt / tr_i
                     cash -= buy_amt
                     costs_ts[i] += fee + slip
             else:
-                cur_val = cash + shares * px_close
+                cur_val = cash + hold_val
                 target_val = cur_val * (t["pos_after"] / 100.0)
-                sell_amt = max(0.0, shares * px_close - target_val)
+                sell_amt = max(0.0, hold_val - target_val)
                 if sell_amt > 0:
                     fee = max(sell_amt * FEE_RATE, FEE_MIN)
                     slip = sell_amt * s
-                    shares -= sell_amt / px_close
+                    q -= sell_amt / tr_i
                     cash += sell_amt
                     costs_ts[i] += fee + slip
         # 融资成本（持仓日计提）：杠杆部分按日计息
         p = positions[i]
         if p > 1.0 + 1e-9:
-            val = cash + shares * px_close
+            val = cash + q * tr_i
             costs_ts[i] += val * (p - 1.0) * FIN_RATE / TRADING_DAYS
         pos_pct[i] = p * 100
-        nav_ts[i] = cash + shares * px_close
+        nav_ts[i] = cash + q * tr_i
     # 显式成本在净值中扣除（等价于每日从收益扣减）
     cum_cost = np.cumsum(costs_ts)
     strategy_nav = (nav_ts - cum_cost) / initial

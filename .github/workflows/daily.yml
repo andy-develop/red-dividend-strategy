@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # v7.12：把抓到的原始输入（data/*.json 存档）与生成产物回写仓库，输入可复核、历史可追溯
 
 concurrency:
   group: daily-update
@@ -16,6 +16,7 @@ concurrency:
 jobs:
   update-and-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 25   # v7.12：防止 fetch 卡死挂起
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,14 +30,35 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run daily update (fetch -> validate -> signal -> build index.html)
-        run: python3 update.py
+        # v7.12：先 --dry-run 验证两次（同一输入幂等断言），再正式生成
+        run: |
+          python3 update.py --out /tmp/dry-index.html --data-out /tmp/dry-data.json
+          python3 update.py --out /tmp/dry-index2.html --data-out /tmp/dry-data2.json
+          cmp /tmp/dry-data.json /tmp/dry-data2.json && echo "幂等断言通过：同一输入两次生成逐位一致"
+          python3 update.py
+
+      - name: Commit input archive + artifacts (reproducible history)
+        # v7.12：输入原始响应/快照/产物全部入库，出争议可还原"某天页面说了什么、依据了什么数据"
+        run: |
+          git config user.name "daily-update-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/ index.html backtest_data.json
+          if git diff --cached --quiet; then
+            echo "无新增变更（今天与昨天输入一致？），跳过 commit"
+          else
+            git commit -m "chore(data): archive inputs & artifacts $(date -u +%Y-%m-%d)"
+            git push
+          fi
 
       - name: Publish to HSK file hosting (overwrite)
+        # v7.12：发布确认——校验 hsk-cli 输出；claimed:false/pending 属正常待确认，重试一次后仍异常则红
         run: |
           npm install -g @aweray/hsk-cli
           export PATH="$PATH:$(npm prefix -g)/bin"
           hsk-cli api-key set --scene file_hosting --key "${{ secrets.HSK_API_KEY }}"
-          hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json
+          out=$(hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json)
+          echo "$out"
+          echo "$out" | grep -qE '"ok"|true|accepted|success|claimed' || { echo "首次发布输出异常，重试一次…"; sleep 5; out2=$(hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json); echo "$out2"; }
         env:
           HSK_API_KEY: ${{ secrets.HSK_API_KEY }}
 
@@ -60,3 +82,8 @@ jobs:
           except Exception as e:
               raise SystemExit(f"发布验证失败：{e}")
           EOF
+
+      - name: Notify on failure
+        # v7.12：失败时告警（利用 GitHub 自身的失败状态，输出显式原因便于排查）
+        if: failure()
+        run: echo "::error::Daily update failed — check the logs above. Page may be stale; inputs archived under data/ are intact."

@@ -15,18 +15,36 @@ import urllib.request
 import pandas as pd
 
 BASE = os.path.dirname(os.path.abspath(__file__))
+# 交易日历（2013-2026，akshare sina；2027 年起需在 2026 年底重新拉取刷新）
+_CAL = os.path.join(BASE, "trade_calendar.csv")
+TRADE_DAYS = set(pd.read_csv(_CAL, parse_dates=["trade_date"])["trade_date"].dt.date.tolist()) if os.path.exists(_CAL) else None
 # 统一回测引擎：优先仓库内 backtest/（同级目录），无则回退上级 backtest/
 _ENGINE_DIR = os.path.join(BASE, "backtest")
 if not os.path.isdir(_ENGINE_DIR):
     _ENGINE_DIR = os.path.join(os.path.dirname(BASE), "backtest")
 sys.path.insert(0, _ENGINE_DIR)
 import engine as E
-OUT = os.path.join(BASE, sys.argv[2] if len(sys.argv) > 2 and sys.argv[1] == "--out" else "index.html")
-DATA_OUT = os.path.join(BASE, sys.argv[4] if len(sys.argv) > 4 and sys.argv[3] == "--data-out" else "backtest_data.json")
+# 【v7.12】稳健 argv 解析（原位置敏感解析会静默吞掉 --data-out 等错序参数）
+_ARGS = sys.argv[1:]
+_OUT = "index.html"; _DATA_OUT = "backtest_data.json"
+while _ARGS:
+    a = _ARGS.pop(0)
+    if a == "--out" and _ARGS:
+        _OUT = _ARGS.pop(0)
+    elif a == "--data-out" and _ARGS:
+        _DATA_OUT = _ARGS.pop(0)
+    elif a == "--dry-run":
+        pass   # 显式 dry-run：配合 --out/--data-out 指向临时路径使用，不覆盖仓库产物
+OUT = os.path.join(BASE, _OUT)
+DATA_OUT = os.path.join(BASE, _DATA_OUT)
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 START = E.START
 LOOKBACK_DAYS = E.LOOKBACK_DAYS
+# 【v7.12】固定左边界锚定：不再 today-LOOKBACK（左边界每天前移导致窗口不可复核），
+# 锚定中证接口 H20269 最早可回溯日 20130719，让每天的数据严格是前一天的超集。
+FETCH_START = "20130719"
+ARCHIVE_DIR = os.path.join(BASE, "data")
 
 
 def fetch_index(code, start, end, retries=4):
@@ -47,28 +65,92 @@ def fetch_index(code, start, end, retries=4):
     raise RuntimeError(f"fetch {code} failed: {last}")
 
 
-def load_prices():
-    """在线抓取 H20269(全收益) 与 H30269(价格)，对齐为 df(date/close/px)。"""
+def load_prices(archive=True):
+    """在线抓取 H20269(全收益) 与 H30269(价格)，对齐为 df(date/close/px)。
+    原始响应按日期存档到 data/（当日不可变输入，供复现核对）；返回 (df, raw, paths)。"""
     today = datetime.date.today()
-    start = (today - datetime.timedelta(days=LOOKBACK_DAYS)).strftime("%Y%m%d")
     end = today.strftime("%Y%m%d")
-    tr = {r["tradeDate"]: r["close"] for r in fetch_index("H20269", start, end)}
-    px = {r["tradeDate"]: r["close"] for r in fetch_index("H30269", start, end)}
+    tr_rows = fetch_index("H20269", FETCH_START, end)
+    px_rows = fetch_index("H30269", FETCH_START, end)
+    tr = {r["tradeDate"]: r["close"] for r in tr_rows}
+    px = {r["tradeDate"]: r["close"] for r in px_rows}
     dates = sorted(set(tr) & set(px))
     df = pd.DataFrame({"date": pd.to_datetime(dates), "close": [tr[d] for d in dates], "px": [px[d] for d in dates]})
     df = df.sort_values("date").reset_index(drop=True)
     # 注意：不截断到 START——保留 START 前的指标 warm-up（与 v7.6 一致，见 engine.get_prices 说明）
-    return df
+    if archive:
+        os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        day = today.strftime("%Y%m%d")
+        paths = []
+        for code, rows in (("H20269", tr_rows), ("H30269", px_rows)):
+            p = os.path.join(ARCHIVE_DIR, f"{code}-{day}.json")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"date": day, "indexCode": code, "rows": rows}, f, ensure_ascii=False)
+            paths.append(p)
+        return df, tr_rows, px_rows, paths
+    return df, tr_rows, px_rows, None
 
 
-def validate_data(df, today=None):
-    """数据完整性校验：最新交易日新鲜度、两序列覆盖差异、缺口率。
-    返回警告列表（不抛异常——页面顶部展示警告条，避免全天失败导致页面不更新）。"""
+def trade_day_info(today=None):
+    """交易日历闸门：今天是否交易日、下个交易日、数据日期陈旧天数。
+    返回 dict 供页面横幅与卡片措辞使用；交易日历缺失时降级（仅周末判断）。"""
+    today = today or datetime.date.today()
+    if TRADE_DAYS is None:
+        return {"is_today_trade": today.weekday() < 5, "next_trade": None,
+                "cal_missing": True}
+    nxt = today
+    while nxt not in TRADE_DAYS:
+        nxt += datetime.timedelta(days=1)
+        if nxt > today + datetime.timedelta(days=14):   # 安全阀（日历异常时不无限循环）
+            break
+    return {"is_today_trade": today in TRADE_DAYS, "next_trade": nxt.strftime("%Y-%m-%d"),
+            "cal_missing": False}
+
+
+def validate_data(df, today=None, hard=True):
+    """数据完整性校验（v7.12 升级为硬闸门）：
+    - 收盘价强转 float，拒 NaN/<=0
+    - 最新数据日必须是交易日（交易日历），且不得晚于最近一个交易日（防盘中占位值）
+    - 重复日期键、晚于今日的行直接拒绝
+    - 两序列日期并集差异
+    hard=True 时校验失败 raise（宁可 job 红、保留昨日页面，不用残缺数据重算发布）；
+    软警告（滞后 >3 天等）仍返回列表供页面展示。"""
     warns = []
     today = today or datetime.date.today()
+    # ---- 硬校验 ----
+    try:
+        df["close"] = df["close"].astype(float)
+        df["px"] = df["px"].astype(float)
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"收盘价无法转 float：{e}") if hard else None
+    if df["close"].isna().any() or df["px"].isna().any() or (df["close"] <= 0).any() or (df["px"] <= 0).any():
+        bad_n = int(df["close"].isna().sum() + df["px"].isna().sum() + (df["close"] <= 0).sum() + (df["px"] <= 0).sum())
+        if hard:
+            raise ValueError(f"收盘价存在 {bad_n} 个 NaN/非正值，拒绝发布")
+        warns.append(f"收盘价存在 {bad_n} 个 NaN/非正值")
+    if df["date"].duplicated().any():
+        if hard:
+            raise ValueError(f"存在 {int(df['date'].duplicated().sum())} 个重复日期键，拒绝发布")
+        warns.append("存在重复日期键")
+    if TRADE_DAYS is not None:
+        last = df["date"].iloc[-1].date()
+        if last > today:
+            if hard:
+                raise ValueError(f"最新数据日 {last} 晚于今天 {today}（疑似盘中占位），拒绝发布")
+        if last not in TRADE_DAYS:
+            if hard:
+                raise ValueError(f"最新数据日 {last} 不是交易日（交易日历），拒绝发布")
+        # 数据日不得早于最近交易日超 10 个自然日
+        recent = today
+        while recent not in TRADE_DAYS:
+            recent -= datetime.timedelta(days=1)
+        stale_hard = (recent - last).days
+        if stale_hard > 10:
+            if hard:
+                raise ValueError(f"最新数据日 {last} 距最近交易日 {recent} 达 {stale_hard} 天，拒绝发布")
+    # ---- 软警告 ----
     last = df["date"].iloc[-1].date()
     stale = (today - last).days
-    # 覆盖春节长假(8天)+周末(2天)≈10 个自然日；超过则视为陈旧
     if stale > 10:
         warns.append(f"数据陈旧：最新数据 {last}，距今天 {stale} 天（>10 天，疑似接口缺最新交易日）")
     elif stale > 3:
@@ -95,7 +177,7 @@ def bj_now():
     return (datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))).strftime("%Y-%m-%d %H:%M")
 
 
-def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None):
+def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None, cal=None):
     """今日快照：信号指标(px)、当前状态、触发缺口、临时仓倒计时。"""
     r = df.iloc[-1]
     close = float(r["close"])          # 全收益收盘（收益口径）
@@ -104,10 +186,21 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None):
     upper = float(r["upper"]); lower = float(r["lower"])
     up63 = float(r["up63"]); dn63 = float(r["dn63"])
     last_date = r["date"]
-    # 超卖缺口（2-of-4，px）
+    # 超卖缺口（2-of-4，px）——逐条件列出，不合成单数：
+    # 2-of-4 只需再中 (2-已命中) 个；hi63 用"明日窗口"推演（明天的 rolling(63).max().shift(1)
+    # 会把今天纳入、挤掉最老一天 → 阈值 = max(hi63, px)）
     need_band_low = max(0.0, (px / lower - 1) * 100)
-    need_dn = max(0.0, (1 - float(r["hi63"]) * (1 - E.Y_DOWN / 100) / px) * 100)
-    os_gap = max(need_band_low, need_dn)
+    hi63_next = max(float(r["hi63"]), px)
+    need_dn = max(0.0, (1 - hi63_next * (1 - E.Y_DOWN / 100) / px) * 100)
+    hits_os = int((wj < E.J_LOW) + (px <= lower) + (float(r["dn63"]) <= -E.Y_DOWN) + (wrsi < E.RSI_OS))
+    os_gap = {
+        "hits": hits_os, "need": max(0, 2 - hits_os),
+        "band": {"gap": round(need_band_low, 2), "hit": bool(px <= lower)},
+        "dn63": {"gap": round(need_dn, 2), "hit": bool(float(r["dn63"]) <= -E.Y_DOWN)},
+        "wj": {"val": round(wj, 2), "hit": bool(wj < E.J_LOW)},
+        "wrsi": {"val": round(wrsi, 2), "hit": bool(wrsi < E.RSI_OS)},
+        "hi63_next": round(hi63_next, 2),
+    }
     # A态超买缺口（三维极值，px）
     need_band_up = max(0.0, (upper / px - 1) * 100)
     need_up = max(0.0, (float(r["lo63"]) * (1 + E.X_UP / 100) / px - 1) * 100)
@@ -131,6 +224,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None):
     snap = {
         "generated_at": bj_now(),
         "data_date": last_date.strftime("%Y-%m-%d"),
+        "cal": cal or {"is_today_trade": None, "next_trade": None, "cal_missing": True},
         "close": round(close, 2), "px": round(px, 2),
         "ma200": round(float(r["ma200"]), 2), "upper": round(upper, 2), "lower": round(lower, 2),
         "wj": round(wj, 2), "wrsi": round(wrsi, 2), "rsi": round(rsi, 2),
@@ -138,10 +232,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None):
         "state": state, "pos": int(round(pos * 100)),
         "oversold_now": bool(r["oversold"]), "overbought_now": bool(r["overbought"]),
         "momentum_lost_now": bool(r["momentum_lost"]),
-        "os_gap": {"need_drop_pct": round(os_gap, 2),
-                   "band_gap": round(need_band_low, 2), "dn63_gap": round(need_dn, 2),
-                   "wj_val": round(wj, 2), "wj_ok": wj < E.J_LOW,
-                   "wrsi_val": round(wrsi, 2), "wrsi_ok": wrsi < E.RSI_OS},
+        "os_gap": os_gap,
         "ob_gap": {"need_rise_pct": round(ob_gap, 2),
                    "band_gap": round(need_band_up, 2), "up63_gap": round(need_up, 2),
                    "wj_val": round(wj, 2), "wj_ok": wj > E.J_HIGH},
@@ -202,13 +293,26 @@ def render(snap, bt):
 
 def main():
     print("[1/4] 抓取行情...")
-    df_all = load_prices()
-    print(f"      共 {len(df_all)} 条，最新 {df_all['date'].iloc[-1].date()}")
+    df_all, tr_rows, px_rows, raw_paths = load_prices(archive=True)
+    print(f"      共 {len(df_all)} 条，最新 {df_all['date'].iloc[-1].date()}（原始响应已存档 data/）")
     warnings = validate_data(df_all)
     for w in warnings:
         print("  [警告]", w)
+    # 原始响应不可变存档：snapshot 级（当日完整输入）
+    if raw_paths:
+        day = datetime.date.today().strftime("%Y%m%d")
+        snap_path = os.path.join(ARCHIVE_DIR, f"snapshot-{day}.json")
+        with open(snap_path, "w", encoding="utf-8") as f:
+            json.dump({"date": day, "tr_n": len(tr_rows), "px_n": len(px_rows),
+                       "rows": len(df_all), "last": df_all['date'].iloc[-1].strftime("%Y-%m-%d")}, f, ensure_ascii=False)
+        print(f"      输入快照存档：{snap_path}")
     print("[2/4] 统一引擎：信号(px, 含warm-up) + T+1 撮合 + 净值核算...")
     df_all = E.build_signals(df_all)
+    # 【v7.12】估值门数据大面积缺失时直接红掉：禁止 VAL_GATE 静默把超卖信号关成 0 后仍发布绿页面
+    if E.VAL_GATE:
+        sp = df_all["spread_pct"].dropna()
+        if len(sp) < len(df_all) * 0.5:
+            raise RuntimeError(f"估值剪刀差分位数缺失 {int(len(df_all)-len(sp))}/{len(df_all)} 行（cn10y 未刷新？），拒绝发布")
     trades, closed, positions, state, pos, legs, t0 = E.replay(df_all, t1=True, start=E.START)
     df = df_all[df_all["date"] >= pd.Timestamp(E.START)].reset_index(drop=True)
     ec = E.equity_curve(df, trades, positions)
@@ -221,7 +325,7 @@ def main():
         json.dump(bt, f, ensure_ascii=False)
     print(f"      {DATA_OUT} ({len(bt['dates'])} 采样点 / {len(trades)} 笔 / {bt['end']})")
     print("[4/4] 生成 HTML...")
-    snap = build_snapshot(df_all, state, pos, legs, t0, trades, os_stat, warnings)
+    snap = build_snapshot(df_all, state, pos, legs, t0, trades, os_stat, warnings, cal=trade_day_info())
     html = render(snap, bt)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)
