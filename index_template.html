@@ -176,9 +176,30 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     </div>
   </section>
 
-  <!-- ④ 进阶（默认折叠） -->
+  <!-- ④ 策略概览（给用户全貌和预期） -->
   <section>
-    <div class="sec-t">④ 为什么 / 回测证据 / 术语（想深究再展开）</div>
+    <div class="sec-t">④ 策略概览 · 这套策略平时怎么操作（先看这个）</div>
+    <div class="card">
+      <div class="ov-hero">总体思想：<b>满仓 + 超跌抄底</b></div>
+      <div style="font-size:13.5px;color:var(--ink2);line-height:1.7;margin-top:10px">
+        平时把本金 100% 买成红利低波 ETF 一直拿着，不折腾；<br>
+        只在市场跌到情绪冰点（周线 J 极值超卖等 4 个恐慌信号至少 2 个共振）时，<b>短暂借钱加仓</b>到 125% / 150%，最多 60 天内卖掉回到满仓；<br>
+        极端贪婪（3 个过热信号同时满足）时<b>清仓落袋</b>，等回调后再满仓买回。
+      </div>
+      <div class="ov-stats">
+        <div class="ov-cell"><div class="lab">每年约</div><div class="val" style="color:var(--up)" id="ov-add">—</div><div class="lab">次加仓抄底</div></div>
+        <div class="ov-cell"><div class="lab">每次加仓平均持有</div><div class="val" id="ov-hold">—</div><div class="lab">天（最长 60 天）</div></div>
+        <div class="ov-cell"><div class="lab">清仓离场约</div><div class="val" style="color:var(--down)" id="ov-clear">—</div><div class="lab">次 / 年（多数年份没有）</div></div>
+        <div class="ov-cell"><div class="lab">抄底单档胜率</div><div class="val" style="color:var(--up)" id="ov-wr">—</div><div class="lab" id="ov-wl">—</div></div>
+      </div>
+      <div class="bt-note" id="ov-detail">10 年回测：共 <b id="ov-total">—</b> 次加仓（125% × <span id="ov-125">—</span> 次、150% × <span id="ov-150">—</span> 次），多数年份 2~4 次，最频繁的 2018 / 2021 年各 6 次；平均每档超跌抄底赚 <b id="ov-avg">—</b>。</div>
+      <div class="ov-note">预期管理：一年里大概会看到 <b>2~4 次</b>「今天可以加仓抄底」的提示，之后 1~2 个月内大概率出现卖点；其余时间页面都会显示「继续满仓持有」——没信号就什么都不做，这才是这套策略的常态。</div>
+    </div>
+  </section>
+
+  <!-- ⑤ 进阶（默认折叠） -->
+  <section>
+    <div class="sec-t">⑤ 为什么 / 回测证据 / 术语（想深究再展开）</div>
 
     <details>
       <summary>为什么今天这么说（信号明细）</summary>
@@ -224,26 +245,6 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
           <div class="g"><b>清仓离场 / 空仓</b><span>涨太多（3 个过热信号同时满足）时全部卖出落袋，等回调后再买回。</span></div>
           <div class="g"><b>融资融券</b><span>券商的借钱炒股业务：门槛 50 万资产 + 半年交易经验。没有两融账户就只做 100% 底仓，忽略加仓信号。</span></div>
         </div>
-      </div>
-    </details>
-
-    <details>
-      <summary>策略概览 · 这套策略平时怎么操作（先看这个）</summary>
-      <div class="detail-body">
-        <div class="ov-hero">总体思想：<b>满仓 + 超跌抄底</b></div>
-        <div style="font-size:13.5px;color:var(--ink2);line-height:1.7;margin-top:8px">
-          平时把本金 100% 买成红利低波 ETF 一直拿着，不折腾；<br>
-          只在市场跌到情绪冰点（周线 J 极值超卖等 4 个恐慌信号至少 2 个共振）时，<b>短暂借钱加仓</b>到 125% / 150%，最多 60 天内卖掉回到满仓；<br>
-          极端贪婪（3 个过热信号同时满足）时<b>清仓落袋</b>，等回调后再满仓买回。
-        </div>
-        <div class="ov-stats">
-          <div class="ov-cell"><div class="lab">每年约</div><div class="val" style="color:var(--up)" id="ov-add">—</div><div class="lab">次加仓抄底</div></div>
-          <div class="ov-cell"><div class="lab">每次加仓平均持有</div><div class="val" id="ov-hold">—</div><div class="lab">天（最长 60 天）</div></div>
-          <div class="ov-cell"><div class="lab">清仓离场约</div><div class="val" style="color:var(--down)" id="ov-clear">—</div><div class="lab">次 / 年（多数年份没有）</div></div>
-          <div class="ov-cell"><div class="lab">抄底单档胜率</div><div class="val" style="color:var(--up)" id="ov-wr">—</div><div class="lab" id="ov-wl">—</div></div>
-        </div>
-        <div class="bt-note" id="ov-detail">10 年回测：共 <b id="ov-total">—</b> 次加仓（125% × <span id="ov-125">—</span> 次、150% × <span id="ov-150">—</span> 次），多数年份 2~4 次，最频繁的 2018 / 2021 年各 6 次；平均每档超跌抄底赚 <b id="ov-avg">—</b>。</div>
-        <div class="ov-note">预期管理：一年里大概会看到 <b>2~4 次</b>「今天可以加仓抄底」的提示，之后 1~2 个月内大概率出现卖点；其余时间页面都会显示「继续满仓持有」——没信号就什么都不做，这才是这套策略的常态。</div>
       </div>
     </details>
 
