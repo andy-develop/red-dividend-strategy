@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>红利低波 · 跟投仪表盘</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
@@ -58,7 +61,9 @@ section{margin-bottom:18px}
 .step .n{flex:0 0 22px;height:22px;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:2px}
 /* ===== ④ 折叠 ===== */
 details{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
-details>summary{cursor:pointer;padding:13px 16px;font-size:14.5px;font-weight:600;color:var(--ink2);list-style:none;display:flex;justify-content:space-between;align-items:center}
+details>summary{cursor:pointer;padding:13px 16px;font-size:14.5px;font-weight:600;color:var(--ink2);list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}
+details>summary .sum-t{flex:1 1 auto;min-width:0}
+details>summary .sum-n{flex:0 0 auto;font-size:12px;font-weight:400;color:var(--dim);white-space:nowrap}
 details>summary::-webkit-details-marker{display:none}
 details>summary::after{content:"＋";color:var(--dim);font-size:15px}
 details[open]>summary::after{content:"－"}
@@ -243,7 +248,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     </details>
 
     <details>
-      <summary>历史买卖点明细（全期 <span id="tr-count">—</span> 笔）</summary>
+      <summary><span class="sum-t">历史买卖点明细</span><span class="sum-n">全期 <b id="tr-count">—</b> 笔</span></summary>
       <div class="detail-body">
         <div class="tbl-wrap"><table id="trade-tbl"></table></div>
       </div>
