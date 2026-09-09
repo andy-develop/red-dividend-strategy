@@ -118,6 +118,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 </head>
 <body>
 <div class="wrap">
+  <div id="warn-bar" style="display:none;background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6"></div>
   <header>
     <div class="brand">中证红利低波动全收益指数 · 跟投仪表盘</div>
     <h1>红利低波 · 今天该怎么做 <span id="h-state" class="badge">…</span></h1>
@@ -293,7 +294,12 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
   document.getElementById("h-state").textContent = stateMap[S.state] || S.state;
   document.getElementById("h-state").className = "badge " + (S.state=="B"?"b-danger":(S.pos>100?"b-warn":"b-ok"));
   document.getElementById("h-date").textContent = S.data_date;
-  document.getElementById("h-gen").textContent = S.generated_at;
+  document.getElementById("h-gen").textContent = S.generated_at + "（北京时间）";
+  if (S.warnings && S.warnings.length) {
+    var wb = document.getElementById("warn-bar");
+    wb.style.display = "block";
+    wb.innerHTML = "<b>⚠ 数据异常提示：</b>" + S.warnings.join("；") + "。请留意本页数据是否过旧。";
+  }
   document.getElementById("h-pos").textContent = S.pos + "%";
 
   // ===== ① 今天做什么（人话结论） =====

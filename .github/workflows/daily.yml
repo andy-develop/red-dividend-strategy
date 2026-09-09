@@ -2,7 +2,7 @@ name: Daily Update (08:00 CST)
 
 on:
   schedule:
-    # 北京时间 08:00 = UTC 00:00
+    # 北京时间 08:00 = UTC 00:00（GitHub schedule 用 UTC；负载高时可能延迟数分钟或跳过当天，全量抓取设计不丢数据）
     - cron: "0 0 * * *"
   workflow_dispatch:
 
@@ -25,10 +25,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps
-        run: pip install --quiet pandas numpy
+      - name: Install deps (pinned)
+        run: pip install -r requirements.txt
 
-      - name: Run daily update (fetch -> signal -> build index.html)
+      - name: Run daily update (fetch -> validate -> signal -> build index.html)
         run: python3 update.py
 
       - name: Publish to HSK file hosting (overwrite)
@@ -39,3 +39,24 @@ jobs:
           hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json
         env:
           HSK_API_KEY: ${{ secrets.HSK_API_KEY }}
+
+      - name: Verify published page is the new build
+        # 发布后验证：线上 PAYLOAD 的 generated_at 必须与本次本地产物一致，否则标红（人工可查日志）
+        run: |
+          python3 - <<'EOF'
+          import json, re, urllib.request
+          local = json.loads(re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', open("index.html", encoding="utf-8").read(), re.S).group(1))
+          try:
+              with urllib.request.urlopen("https://945q5w.gicp.fun", timeout=30) as r:
+                  html = r.read().decode("utf-8", "ignore")
+              m = re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', html, re.S)
+              online = json.loads(m.group(1)) if m else {}
+              lv, ov = local["backtest"]["generated_at"], online.get("backtest", {}).get("generated_at")
+              print(f"本地 generated_at: {lv}")
+              print(f"线上 generated_at: {ov}")
+              if lv != ov:
+                  raise SystemExit(f"发布验证失败：线上仍是旧版（{ov} != {lv}）")
+              print("发布验证通过：线上已是本次构建")
+          except Exception as e:
+              raise SystemExit(f"发布验证失败：{e}")
+          EOF

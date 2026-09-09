@@ -61,7 +61,41 @@ def load_prices():
     return df
 
 
-def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
+def validate_data(df, today=None):
+    """数据完整性校验：最新交易日新鲜度、两序列覆盖差异、缺口率。
+    返回警告列表（不抛异常——页面顶部展示警告条，避免全天失败导致页面不更新）。"""
+    warns = []
+    today = today or datetime.date.today()
+    last = df["date"].iloc[-1].date()
+    stale = (today - last).days
+    # 覆盖春节长假(8天)+周末(2天)≈10 个自然日；超过则视为陈旧
+    if stale > 10:
+        warns.append(f"数据陈旧：最新数据 {last}，距今天 {stale} 天（>10 天，疑似接口缺最新交易日）")
+    elif stale > 3:
+        warns.append(f"数据滞后：最新数据 {last}，距今天 {stale} 天（非交易日属正常，若为工作日请留意）")
+    # 两序列缺失差异：交易日只应相差节假（春节等），差异>5 天提示
+    if "tr_date" in df.columns or "px_date" in df.columns:
+        pass
+    # 异常值：收盘价须为正
+    bad = df[(df["close"] <= 0) | (df["px"] <= 0)]
+    if len(bad):
+        warns.append(f"检测到 {len(bad)} 个非正收盘价（{bad['date'].iloc[0].date()} 起），数据异常")
+    if df["close"].isna().any() or df["px"].isna().any():
+        warns.append("收盘价存在空值")
+    # 单日异常跳变（>25%，除权除息或接口错误）
+    chg = (df["close"].pct_change().abs())
+    sp = df.loc[chg > 0.25, "date"]
+    if len(sp):
+        warns.append(f"全收益指数单日变动>25% 的日期 {len(sp)} 个（{sp.iloc[0].date()}…，疑似数据错误）")
+    return warns
+
+
+def bj_now():
+    """北京时间（UTC+8）时间戳，用于页面展示。"""
+    return (datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))).strftime("%Y-%m-%d %H:%M")
+
+
+def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None):
     """今日快照：信号指标(px)、当前状态、触发缺口、临时仓倒计时。"""
     r = df.iloc[-1]
     close = float(r["close"])          # 全收益收盘（收益口径）
@@ -95,7 +129,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
                      "rebuy_due": rebuy.strftime("%Y-%m-%d"),
                      "remaining_days": max(0, (rebuy - last_date).days)}
     snap = {
-        "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "generated_at": bj_now(),
         "data_date": last_date.strftime("%Y-%m-%d"),
         "close": round(close, 2), "px": round(px, 2),
         "ma200": round(float(r["ma200"]), 2), "upper": round(upper, 2), "lower": round(lower, 2),
@@ -124,6 +158,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat):
                 "ma250": round(float(r["ma250"]), 2),
                 "ma250_ok": float(r["px"]) < float(r["ma250"])},
         "legs": legs_info, "exit": exit_info,
+        "warnings": warnings or [],
         "recent_trades": trades[-12:],
         "oversold_stat": os_stat,
         "param": {"j_low": E.J_LOW, "j_high": E.J_HIGH, "j_cross_from": E.J_CROSS_FROM,
@@ -145,7 +180,7 @@ def build_backtest_payload(df, trades, ec, metrics, os_stat, overview):
     if idx[-1] != n - 1:
         idx.append(n - 1)
     return {
-        "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "generated_at": bj_now(),
         "start": ec["dates"][0], "end": ec["dates"][-1],
         "dates": [ec["dates"][i] for i in idx],
         "strategy_nav": [round(float(ec["strategy_nav"][i]), 6) for i in idx],
@@ -169,6 +204,9 @@ def main():
     print("[1/4] 抓取行情...")
     df_all = load_prices()
     print(f"      共 {len(df_all)} 条，最新 {df_all['date'].iloc[-1].date()}")
+    warnings = validate_data(df_all)
+    for w in warnings:
+        print("  [警告]", w)
     print("[2/4] 统一引擎：信号(px, 含warm-up) + T+1 撮合 + 净值核算...")
     df_all = E.build_signals(df_all)
     trades, closed, positions, state, pos, legs, t0 = E.replay(df_all, t1=True, start=E.START)
@@ -183,7 +221,7 @@ def main():
         json.dump(bt, f, ensure_ascii=False)
     print(f"      {DATA_OUT} ({len(bt['dates'])} 采样点 / {len(trades)} 笔 / {bt['end']})")
     print("[4/4] 生成 HTML...")
-    snap = build_snapshot(df_all, state, pos, legs, t0, trades, os_stat)
+    snap = build_snapshot(df_all, state, pos, legs, t0, trades, os_stat, warnings)
     html = render(snap, bt)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)

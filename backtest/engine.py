@@ -150,7 +150,7 @@ def build_signals(df, use_tr=False):
         df["macd_hist"] = 2 * (dif - dea)
         df["hi10macd"] = df["macd_hist"].rolling(10).max().shift(1)
         macd_diverg = (c > df["hi10c"]) & (df["macd_hist"] < df["hi10macd"])
-        vol = df["vol"].fillna(method="ffill")
+        vol = df["vol"].ffill()
         df["vol5"] = vol.rolling(5).mean()
         vol_diverg = (c > df["hi10c"]) & (df["vol"] < df["vol5"])
         df["diverg"] = (rsi_diverg.astype(int) + macd_diverg.astype(int) + vol_diverg.astype(int)) >= 2

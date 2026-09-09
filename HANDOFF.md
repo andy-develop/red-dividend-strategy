@@ -287,3 +287,23 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
 **v7.11 定稿**：MA250_GATE=VAL_GATE=True（3y 分位），WEEK_J0=False。全期（rolling 09-08）**+168.2%/0.68/−31.7%/44 笔/抄底 20 档胜率 90%/加仓 2.0 次年**。
 **页面**：温度计下新增"抄底门槛"行（估值分位 + 年线状态 + 拦截提示）；策略说明更新 2-of-4×双重门槛；今日 09-08 估值分位 48.5% <50%，页面演示拦截（gate_ok False）。
 **坑**：expanding 与滚动窗口混用（patch 顺序）会产出不可复现混合结果（+169.2%），已重跑 clean 配置修正；5y 冷启动问题由 WF 暴露。
+
+## 18. 每日自动更新链路可靠性审查与加固（2026-09-09）
+
+用户要求自查"完全依赖 GitHub Actions 每天更新有没有问题"。审查结论与修复：
+
+**已核实无问题**：
+- cron "0 0 * * *"（UTC）= 北京 8:00，2026-09-09 提交，首次 schedule 触发为次日 08:00（当前全部 run 均为 dispatch，属正常）
+- 中证当日数据延迟发布（16:56 实测仍无当日）→ 早 8 点取 T-1 收盘属设计；周末/节假日 data_date 停留最后交易日
+- 全量抓取（4800 天窗口）设计：即使 schedule 某天被跳过/延迟，下次跑全量重建，数据不丢
+- concurrency 防重叠；secrets（HSK_API_KEY/RESOURCE_ID）已配置；Actions 失败默认邮件通知仓库 owner
+- hsk-cli +host 命令实测有效（v7.11 已线上生效）
+
+**发现并修复的问题**：
+1. **[严重] 数据陈旧静默**：两序列交集取数 + 无最新日期校验，接口部分返回时会静默倒退 data_date → update.py 加 validate_data（>10 天陈旧 / >3 天滞后 / 非正价 / 空值 / 单日>25% 异常），警告展示在页面顶部黄条，不静默
+2. **[隐患] pandas 版本漂移炸弹**：workflow 用 `pip install pandas numpy` 不锁版本，代码含已弃用 `fillna(method=)` → 改 `-r requirements.txt` 锁 pandas<2.3/numpy<2.3，engine 改 ffill()
+3. **[展示] generated_at 显示 UTC** → 统一北京时间
+4. **[数据] cn10y 静态缓存永不刷新** → 新增 refresh_cn10y.py（每季度手动刷新，文档注明；缓存缺失引擎自动降级）
+5. **[流程] 发布无自动验证** → workflow 加 Verify 步骤比对线上/本地 generated_at
+
+**已知残余风险（接受/需人工）**：HSK 或中证任一外部依赖故障时页面停留旧版（有黄条警告 + Actions 邮件通知，无第三方告警）；schedule 触发不保证准时（官方机制）；cn10y 需季度人工刷新。
