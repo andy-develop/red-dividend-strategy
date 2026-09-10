@@ -358,3 +358,10 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
 - 修复过的 bug：三级路由 hash 最初取整串（#/sel-cat/cat-broad → key 不匹配不生效），改为 split("/").pop() 取最后一段。
 
 **发布**：update.py 重生成（数据滚动到 2026-09-09，+286.5%/0.90/−29.0%/44 笔——多一个交易日的正常滚动，非口径变化）→ git commit + push → dispatch daily.yml → 线上 945q5w.gicp.fun 验证（v7.13 标记 + 目录树）。
+
+## 21. 目录移动到左侧（v7.13 修订，2026-09-10）
+
+用户要求目录整体换到左边。改动：
+- DOM：`<aside class="sidebar">` 从 main 之后移到 main 之前（flex 布局左→右，桌面目录即居左，sticky 不变）。
+- 移动端抽屉反向：`right:0; translateX(102%)` → `left:0; translateX(-102%)`（从左滑入），阴影方向 `-6px → 6px`，悬浮按钮 `right:14px → left:14px`（左下角）。
+- 验证：桌面 sidebar 左缘 146 < main 左缘 402（目录在左）；移动端抽屉 left 0→right 270 从左侧滑入、开/关无横向滚动（scrollWidth==390）；shot.py 桌面无错误/无溢出。

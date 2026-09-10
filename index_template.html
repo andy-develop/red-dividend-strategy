@@ -47,9 +47,9 @@ body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft 
 .empty-desc{font-size:14px;color:var(--sub);margin-top:14px;max-width:420px;margin-left:auto;margin-right:auto;line-height:1.7}
 @media(max-width:900px){
   .layout{flex-direction:column-reverse;padding:12px 10px 30px;gap:0}
-  .sidebar{position:fixed;right:0;top:0;height:100%;width:270px;border-radius:0;border:none;box-shadow:-6px 0 24px rgba(22,50,79,.15);z-index:50;transform:translateX(102%);transition:transform .25s ease;max-height:100%;padding-top:18px;visibility:hidden;pointer-events:none}
+  .sidebar{position:fixed;left:0;top:0;height:100%;width:270px;border-radius:0;border:none;box-shadow:6px 0 24px rgba(22,50,79,.15);z-index:50;transform:translateX(-102%);transition:transform .25s ease;max-height:100%;padding-top:18px;visibility:hidden;pointer-events:none}
   .sidebar.open{transform:translateX(0);visibility:visible;pointer-events:auto}
-  .menu-btn{display:flex;position:fixed;right:14px;bottom:20px;z-index:60;width:46px;height:46px;border-radius:50%;border:none;background:var(--blue);color:#fff;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(43,108,176,.35);cursor:pointer}
+  .menu-btn{display:flex;position:fixed;left:14px;bottom:20px;z-index:60;width:46px;height:46px;border-radius:50%;border:none;background:var(--blue);color:#fff;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(43,108,176,.35);cursor:pointer}
   .menu-btn svg{width:20px;height:20px}
 }
 /*（640px 下的字号微调合并到下方统一 @media）
@@ -153,6 +153,11 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 </head>
 <body>
 <div class="layout">
+  <!-- 左侧目录 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="side-head">策略导航</div>
+    <ul class="tree" id="tree"></ul>
+  </aside>
   <main class="main">
   <div id="view-hongli" class="view">
   <div id="warn-bar" style="display:none;background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6"></div>
@@ -326,12 +331,6 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     </div>
   </div>
   </main>
-
-  <!-- 右侧目录 -->
-  <aside class="sidebar" id="sidebar">
-    <div class="side-head">策略导航</div>
-    <ul class="tree" id="tree"></ul>
-  </aside>
 </div>
 <div id="mask" class="mask"></div>
 <button id="menu-btn" class="menu-btn" aria-label="打开目录"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
