@@ -35,12 +35,20 @@ jobs:
         #   两脚本各自携带对方 payload 段，顺序不影响最终页面。
         #   v7.14b：行业轮动先 --fetch-only 抓一次（限流窗口下抓取是长尾），dry×2 + 正式三跑共用同一 raw，
         #   幂等断言更强（同一输入逐位一致）且抓取量 3×→1×。
+        #   v7.14c：东财对 runner IP 连接级间歇封锁（实测 2 轮重试仅 15/32）——fetch-only 失败时
+        #   自动回退到仓库内最新归档（data/sector-raw-*.json.gz，本地/China IP 抓取），保证每日发布可用。
         run: |
           python3 update.py --dry-run --out /tmp/dry-index.html --data-out /tmp/dry-data.json
           python3 update.py --dry-run --out /tmp/dry-index2.html --data-out /tmp/dry-data2.json
           cmp /tmp/dry-data.json /tmp/dry-data2.json && echo "红利低波幂等断言通过：同一输入两次生成逐位一致"
           python3 update.py
-          python3 sector_update.py --fetch-only /tmp/sector-raw.json
+          SECTOR_QUICK=1 python3 sector_update.py --fetch-only /tmp/sector-raw.json || true
+          if [ ! -s /tmp/sector-raw.json ]; then
+            echo "行业轮动抓取失败（东财限流/封锁），回退到最新归档..."
+            RAW=$(ls -t data/sector-raw-*.json.gz | head -1)
+            echo "使用归档: $RAW"
+            python3 -c "import gzip,json,sys; json.dump(json.load(gzip.open('$RAW', 'rt', encoding='utf-8')), open('/tmp/sector-raw.json','w',encoding='utf-8'), ensure_ascii=False)"
+          fi
           python3 sector_update.py --raw /tmp/sector-raw.json --dry-run --out /tmp/dry-sector-index.html --data-out /tmp/dry-sector-data.json
           python3 sector_update.py --raw /tmp/sector-raw.json --dry-run --out /tmp/dry-sector-index2.html --data-out /tmp/dry-sector-data2.json
           cmp /tmp/dry-sector-data.json /tmp/dry-sector-data2.json && echo "行业轮动幂等断言通过：同一输入两次生成逐位一致"

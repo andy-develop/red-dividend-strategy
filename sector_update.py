@@ -71,7 +71,9 @@ def fetch_all():
                     print(f"  [失败] {code} {name}（{ind}）：{str(exc)[:120]}")
 
     grab(U.ALL_ETFS)
-    for rnd in range(2):
+    # CI 场景（SECTOR_QUICK=1）：runner IP 被东财连接级封锁时快速失败，由 workflow 回退到归档
+    max_rnd = 1 if os.environ.get("SECTOR_QUICK") else 2
+    for rnd in range(max_rnd):
         if not raw["failures"]:
             break
         pending = [(f["industry"], f["code"], f["name"]) for f in raw["failures"]]
