@@ -31,18 +31,24 @@ jobs:
 
       - name: Run daily update (fetch -> validate -> signal -> build index.html)
         # v7.12：先 --dry-run 验证两次（同一输入幂等断言），再正式生成
+        # v7.14：新增行业轮动（sector_update.py），同一 job 内先红利低波后行业轮动；
+        #   两脚本各自携带对方 payload 段，顺序不影响最终页面
         run: |
-          python3 update.py --out /tmp/dry-index.html --data-out /tmp/dry-data.json
-          python3 update.py --out /tmp/dry-index2.html --data-out /tmp/dry-data2.json
-          cmp /tmp/dry-data.json /tmp/dry-data2.json && echo "幂等断言通过：同一输入两次生成逐位一致"
+          python3 update.py --dry-run --out /tmp/dry-index.html --data-out /tmp/dry-data.json
+          python3 update.py --dry-run --out /tmp/dry-index2.html --data-out /tmp/dry-data2.json
+          cmp /tmp/dry-data.json /tmp/dry-data2.json && echo "红利低波幂等断言通过：同一输入两次生成逐位一致"
           python3 update.py
+          python3 sector_update.py --dry-run --out /tmp/dry-sector-index.html --data-out /tmp/dry-sector-data.json
+          python3 sector_update.py --dry-run --out /tmp/dry-sector-index2.html --data-out /tmp/dry-sector-data2.json
+          cmp /tmp/dry-sector-data.json /tmp/dry-sector-data2.json && echo "行业轮动幂等断言通过：同一输入两次生成逐位一致"
+          python3 sector_update.py
 
       - name: Commit input archive + artifacts (reproducible history)
         # v7.12：输入原始响应/快照/产物全部入库，出争议可还原"某天页面说了什么、依据了什么数据"
         run: |
           git config user.name "daily-update-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data/ index.html backtest_data.json
+          git add data/ index.html backtest_data.json sector_data.json
           if git diff --cached --quiet; then
             echo "无新增变更（今天与昨天输入一致？），跳过 commit"
           else
@@ -63,7 +69,8 @@ jobs:
           HSK_API_KEY: ${{ secrets.HSK_API_KEY }}
 
       - name: Verify published page is the new build
-        # 发布后验证：线上 PAYLOAD 的 generated_at 必须与本次本地产物一致，否则标红（人工可查日志）
+        # 发布后验证：线上 PAYLOAD 的 generated_at（红利低波 backtest + 行业轮动 sector）
+        # 必须与本次本地产物一致，否则标红（人工可查日志）
         run: |
           python3 - <<'EOF'
           import json, re, urllib.request
@@ -74,11 +81,14 @@ jobs:
               m = re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', html, re.S)
               online = json.loads(m.group(1)) if m else {}
               lv, ov = local["backtest"]["generated_at"], online.get("backtest", {}).get("generated_at")
-              print(f"本地 generated_at: {lv}")
-              print(f"线上 generated_at: {ov}")
-              if lv != ov:
-                  raise SystemExit(f"发布验证失败：线上仍是旧版（{ov} != {lv}）")
-              print("发布验证通过：线上已是本次构建")
+              ls, os_ = local["sector"]["generated_at"], online.get("sector", {}).get("generated_at")
+              print(f"本地 红利低波 generated_at: {lv}")
+              print(f"线上 红利低波 generated_at: {ov}")
+              print(f"本地 行业轮动 generated_at: {ls}")
+              print(f"线上 行业轮动 generated_at: {os_}")
+              if lv != ov or ls != os_:
+                  raise SystemExit(f"发布验证失败：线上仍是旧版（{ov} != {lv} 或 {os_} != {ls}）")
+              print("发布验证通过：线上已是本次构建（红利低波 + 行业轮动）")
           except Exception as e:
               raise SystemExit(f"发布验证失败：{e}")
           EOF

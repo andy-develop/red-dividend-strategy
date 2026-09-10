@@ -15,6 +15,8 @@ import urllib.request
 import pandas as pd
 
 BASE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE)
+import payload_util
 # 交易日历（2013-2026，akshare sina；2027 年起需在 2026 年底重新拉取刷新）
 _CAL = os.path.join(BASE, "trade_calendar.csv")
 TRADE_DAYS = set(pd.read_csv(_CAL, parse_dates=["trade_date"])["trade_date"].dt.date.tolist()) if os.path.exists(_CAL) else None
@@ -26,7 +28,7 @@ sys.path.insert(0, _ENGINE_DIR)
 import engine as E
 # 【v7.12】稳健 argv 解析（原位置敏感解析会静默吞掉 --data-out 等错序参数）
 _ARGS = sys.argv[1:]
-_OUT = "index.html"; _DATA_OUT = "backtest_data.json"
+_OUT = "index.html"; _DATA_OUT = "backtest_data.json"; _DRY = False
 while _ARGS:
     a = _ARGS.pop(0)
     if a == "--out" and _ARGS:
@@ -34,7 +36,7 @@ while _ARGS:
     elif a == "--data-out" and _ARGS:
         _DATA_OUT = _ARGS.pop(0)
     elif a == "--dry-run":
-        pass   # 显式 dry-run：配合 --out/--data-out 指向临时路径使用，不覆盖仓库产物
+        _DRY = True   # 显式 dry-run：配合 --out/--data-out 指向临时路径使用，不覆盖仓库产物、不携带线上段
 OUT = os.path.join(BASE, _OUT)
 DATA_OUT = os.path.join(BASE, _DATA_OUT)
 
@@ -173,7 +175,9 @@ def validate_data(df, today=None, hard=True):
 
 
 def bj_now():
-    """北京时间（UTC+8）时间戳，用于页面展示。"""
+    """北京时间（UTC+8）时间戳，用于页面展示。dry-run 固定值保证两次生成逐位一致（幂等断言）。"""
+    if _DRY:
+        return "dry-run"
     return (datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))).strftime("%Y-%m-%d %H:%M")
 
 
@@ -285,10 +289,16 @@ def build_backtest_payload(df, trades, ec, metrics, os_stat, overview):
     }
 
 
-def render(snap, bt):
-    tpl = open(os.path.join(BASE, "index_template.html"), encoding="utf-8").read()
+def render(snap, bt, prev_html=None, tpl=None):
+    """生成自包含 index.html：注入红利低波 payload，并把现有 index.html 里的
+    sector（行业轮动）数据段原样携带回来（两个更新脚本轮流重写同一文件，互不覆盖）。"""
+    tpl = tpl or open(os.path.join(BASE, "index_template.html"), encoding="utf-8").read()
     payload = {"snapshot": snap, "backtest": bt}
-    return tpl.replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False))
+    if prev_html:
+        prev = payload_util.extract(prev_html)
+        if prev and prev.get("sector") is not None:
+            payload["sector"] = prev["sector"]
+    return payload_util.inject(tpl, payload)
 
 
 def main():
@@ -326,7 +336,11 @@ def main():
     print(f"      {DATA_OUT} ({len(bt['dates'])} 采样点 / {len(trades)} 笔 / {bt['end']})")
     print("[4/4] 生成 HTML...")
     snap = build_snapshot(df_all, state, pos, legs, t0, trades, os_stat, warnings, cal=trade_day_info())
-    html = render(snap, bt)
+    prev_html = None
+    if os.path.exists(OUT) and not _DRY:
+        with open(OUT, encoding="utf-8") as f:
+            prev_html = f.read()
+    html = render(snap, bt, prev_html=prev_html)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"      index.html 已生成 ({len(html.encode('utf-8'))//1024} KB) -> {OUT}")
