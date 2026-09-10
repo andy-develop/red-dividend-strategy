@@ -469,3 +469,16 @@ create ticket 可用。用户已拍板"发布为新资源"。最终发布机制�
 - **旧 URL 945q5w.gicp.fun**：HSK 侧 update 禁用无法更新，保持 08:00 旧版（无 sector 视图）；用户接受新 URL。
 - **遗留注意**：每次数据变化（交易日新数据）都会创建新资源 → 新 URL；无数据变化不重复创建。
   若 HSK 恢复 update，发布步骤会自动回归 update 路径（URL 稳定）。
+
+## §28 导航调整 + 发布信号升级（2026-09-10 15:30）
+
+- **用户需求**：删除左侧目录「ETF分类」及子类目（宽基/行业主题/跨境）。已从 index_template.html 与 index.html 删除
+  TREE 中 sel-cat 节点、PAGE 中 sel-cat/cat-broad/cat-sector/cat-cross 条目，并同步精简「选ETF·总览」文案。
+  routeTo 为通用查找（findNode+PAGE），无需改动。
+- **发布信号升级**：data_date 只随交易日变化，页面结构改动不会被感知 → 新增归一化内容指纹 content_sha
+  （index.html 全文剔除所有 generated_at 值后的 sha256）。跳过发布条件 = data_date 与 content_sha 均匹配；
+  数据变化或模板/导航改动都会触发发布。verify 仍比对 data_date（新资源与本地数据日期一致即通过）。
+- **新线上资源**：https://73f9qb.gicp.fun（resource_id 1789030324819741701，本地 hsk-cli host 创建，含删菜单版页面）。
+  已持久化 data/hsk-resource.json（data_date + content_sha）。CI run 34458104865 全绿：构建→commit→发布跳过→verify 通过。
+- **验证**：chrome-headless-shell --dump-dom 本地确认 DOM 中无 ETF分类/宽基ETF/行业主题ETF/跨境ETF；
+  线上 73f9qb curl 确认无 sel-cat，行业轮动/红利低波视图保留。
