@@ -16,8 +16,44 @@
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;font-size:15px;line-height:1.6}
-.wrap{max-width:960px;margin:0 auto;padding:18px 16px 40px}
-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:16px}
+/* ===== 布局：主内容 + 右侧目录（v7.13） ===== */
+.layout{max-width:1180px;margin:0 auto;padding:18px 16px 40px;display:flex;gap:20px;align-items:flex-start}
+.main{flex:1 1 auto;min-width:0}
+.view{min-width:0}
+.sidebar{flex:0 0 236px;position:sticky;top:16px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 10px;max-height:calc(100vh - 32px);overflow-y:auto}
+.side-head{font-size:13px;font-weight:700;color:var(--blue);margin-bottom:8px;letter-spacing:.5px;padding:0 8px}
+.tree{list-style:none}
+.tree ul{list-style:none}
+.lv1{font-size:14px;font-weight:700;color:var(--ink2);padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.lv1:hover{background:#F0F6FD}
+.lv1.cur{background:linear-gradient(135deg,rgba(43,108,176,.13),rgba(43,108,176,.04));color:var(--blue)}
+.lv1 .arr{font-size:10px;color:var(--dim);transition:transform .2s}
+.lv1.open .arr{transform:rotate(180deg)}
+.lv2,.lv3{font-size:13.5px;color:var(--ink);padding:6px 10px 6px 24px;border-radius:8px;cursor:pointer;user-select:none}
+.lv3{padding-left:40px;font-size:13px;color:var(--sub)}
+.lv2:hover,.lv3:hover{background:#F0F6FD}
+.lv2.cur,.lv3.cur{background:#EAF2FB;color:var(--blue);font-weight:600}
+.lv2 .arr{font-size:9px;color:var(--dim);transition:transform .2s;display:inline-block;margin-left:4px}
+.lv2.open .arr{transform:rotate(90deg)}
+.risk{font-size:10.5px;padding:1px 7px;border-radius:999px;margin-left:6px;font-weight:400;vertical-align:1px}
+.r-mid{background:#FDF0DC;color:#B45309}.r-high{background:#FDE8E8;color:#C0392B}
+.mask{position:fixed;inset:0;background:rgba(22,50,79,.35);z-index:49;display:none}
+.menu-btn{display:none}
+/* 空页面 */
+.empty-card{background:var(--card);border:1px dashed #B9CFE6;border-radius:16px;padding:60px 24px;text-align:center}
+.empty-ico{width:64px;height:64px;margin:0 auto 18px;border-radius:50%;background:#EAF2FB;display:flex;align-items:center;justify-content:center;color:var(--blue)}
+.empty-title{font-size:19px;font-weight:700;color:var(--ink)}
+.empty-crumb{font-size:12.5px;color:var(--dim);margin-top:6px}
+.empty-desc{font-size:14px;color:var(--sub);margin-top:14px;max-width:420px;margin-left:auto;margin-right:auto;line-height:1.7}
+@media(max-width:900px){
+  .layout{flex-direction:column-reverse;padding:12px 10px 30px;gap:0}
+  .sidebar{position:fixed;right:0;top:0;height:100%;width:270px;border-radius:0;border:none;box-shadow:-6px 0 24px rgba(22,50,79,.15);z-index:50;transform:translateX(102%);transition:transform .25s ease;max-height:100%;padding-top:18px;visibility:hidden;pointer-events:none}
+  .sidebar.open{transform:translateX(0);visibility:visible;pointer-events:auto}
+  .menu-btn{display:flex;position:fixed;right:14px;bottom:20px;z-index:60;width:46px;height:46px;border-radius:50%;border:none;background:var(--blue);color:#fff;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(43,108,176,.35);cursor:pointer}
+  .menu-btn svg{width:20px;height:20px}
+}
+/*（640px 下的字号微调合并到下方统一 @media）
+}
 .brand{font-size:13px;color:var(--sub)}
 header h1{font-size:20px;font-weight:700;flex:1 1 100%}
 .badge{padding:3px 12px;border-radius:999px;font-size:13px;font-weight:600}
@@ -111,13 +147,14 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 @media(max-width:640px){
   .action-title{font-size:20px}
   .gauge-word{font-size:20px}
-  .wrap{padding:12px 10px 30px}
-  .pos-grid{grid-template-columns:1fr 1fr}
+  .main{padding:0}
 }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="layout">
+  <main class="main">
+  <div id="view-hongli" class="view">
   <div id="warn-bar" style="display:none;background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6"></div>
   <div id="cal-bar" style="display:none;background:#EFF6FF;border:1px solid #3B82F6;color:#1E40AF;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6"></div>
   <header>
@@ -127,7 +164,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <span>数据日期 <b id="h-date">—</b></span>
       <span>生成时间 <b id="h-gen">—</b></span>
       <span>当前策略仓位 <b id="h-pos">—</b></span>
-      <span>策略版本 <b>v7.12</b></span>
+      <span>策略版本 <b>v7.13</b></span>
     </div>
   </header>
 
@@ -277,7 +314,27 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     数据来源：中证指数官网（H20269 全收益 / H30269 价格）· 每日 8:00 自动更新 · 回测 2016-09-08 起 10 年，详见仓库 backtest/engine.py（可复现、可审计）<br>
     本页面仅供策略验证与监控参考，不构成投资建议。加仓（125%/150%）隐含融资，实际执行需评估融资成本与自身风险承受能力。
   </footer>
+  </div><!-- /view-hongli -->
+
+  <!-- 空页面（除红利低波外所有目录节点） -->
+  <div id="view-empty" class="view" style="display:none">
+    <div class="empty-card">
+      <div class="empty-ico"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9m5 10V5m6 14v-7m5 7V3"/><path d="M2 21h20"/></svg></div>
+      <div class="empty-title" id="empty-title">—</div>
+      <div class="empty-crumb" id="empty-crumb">—</div>
+      <div class="empty-desc" id="empty-desc">—</div>
+    </div>
+  </div>
+  </main>
+
+  <!-- 右侧目录 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="side-head">策略导航</div>
+    <ul class="tree" id="tree"></ul>
+  </aside>
 </div>
+<div id="mask" class="mask"></div>
+<button id="menu-btn" class="menu-btn" aria-label="打开目录"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
 
 <script id="PAYLOAD" type="application/json">__PAYLOAD__</script>
 <script>
@@ -289,6 +346,132 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
   var S = D.snapshot, BT = D.backtest, M = BT.metrics || {};
   var fmt = function(x, n){ n = n==null ? 0 : n; return Number(x).toLocaleString("zh-CN", {minimumFractionDigits:n, maximumFractionDigits:n}); };
   var pct1 = function(x){ return (x>0?"+":"") + fmt(x,1) + "%"; };
+
+  // ===== 右侧目录导航 + hash 路由（v7.13）=====
+  var TREE = [
+    {key:"sel", label:"选ETF", children:[
+      {key:"sel-asset", label:"资产配置策略"},
+      {key:"sel-sector", label:"行业轮动策略"},
+      {key:"sel-value", label:"估值驱动策略"},
+      {key:"sel-cat", label:"ETF分类", children:[
+        {key:"cat-broad", label:"宽基ETF", risk:"中"},
+        {key:"cat-sector", label:"行业主题ETF", risk:"高"},
+        {key:"cat-cross", label:"跨境ETF", risk:"高"}
+      ]}
+    ]},
+    {key:"timing", label:"ETF择时", children:[
+      {key:"timing-hongli", label:"红利低波", content:true},
+      {key:"timing-hs300", label:"沪深300"},
+      {key:"timing-zz500", label:"中证500"}
+    ]}
+  ];
+  var PAGE = {
+    "sel":        {t:"选ETF · 总览", c:"ETF 策略总览 · 内容建设中。将覆盖：资产配置策略、行业轮动策略、估值驱动策略、ETF 分类（宽基 / 行业主题 / 跨境）。"},
+    "sel-asset":  {t:"资产配置策略", c:"内容建设中。将在此展示基于宏观环境与资产比价的配置方案与择时信号。"},
+    "sel-sector": {t:"行业轮动策略", c:"内容建设中。将在此展示行业景气度与资金流驱动的轮动信号。"},
+    "sel-value":  {t:"估值驱动策略", c:"内容建设中。将在此展示估值分位（股息率 / PE）驱动的买卖信号。"},
+    "sel-cat":    {t:"ETF 分类", c:"ETF 分类 · 内容建设中。下设宽基 ETF（中风险）、行业主题 ETF（高风险）、跨境 ETF（高风险）。"},
+    "cat-broad":  {t:"宽基 ETF", c:"宽基 ETF（中风险）· 内容建设中。将覆盖沪深300、中证500、中证1000 等宽基指数。"},
+    "cat-sector": {t:"行业主题 ETF", c:"行业主题 ETF（高风险）· 内容建设中。将覆盖消费、医药、科技、新能源等行业主题。"},
+    "cat-cross":  {t:"跨境 ETF", c:"跨境 ETF（高风险）· 内容建设中。将覆盖纳指、标普、恒生等跨境指数。"},
+    "timing":       {t:"ETF 择时 · 总览", c:"ETF 择时 · 总览建设中。将覆盖：红利低波（已上线）、沪深300、中证500。"},
+    "timing-hongli":{t:"红利低波", content:true},
+    "timing-hs300": {t:"沪深300 择时", c:"沪深300 择时 · 内容建设中。将复用红利低波的择时框架（趋势 + 情绪极值 + 估值门）。"},
+    "timing-zz500": {t:"中证500 择时", c:"中证500 择时 · 内容建设中。将复用红利低波的择时框架（趋势 + 情绪极值 + 估值门）。"}
+  };
+  var treeEl = document.getElementById("tree");
+  function renderTree(){
+    treeEl.innerHTML = TREE.map(function(g){
+      return '<li><div class="lv1 open" data-key="'+g.key+'"><span>'+g.label+'</span><span class="arr">▾</span></div><ul>'+g.children.map(function(n){
+        if (n.children) {
+          return '<li><div class="lv2 open" data-key="'+n.key+'">'+n.label+'<span class="arr">›</span></div><ul>'+n.children.map(function(c){
+            var r = c.risk === "中" ? '<span class="risk r-mid">中风险</span>' : (c.risk === "高" ? '<span class="risk r-high">高风险</span>' : "");
+            return '<li><div class="lv3" data-key="'+c.key+'">'+c.label+r+'</div></li>';
+          }).join("")+'</ul></li>';
+        }
+        return '<li><div class="lv2" data-key="'+n.key+'">'+n.label+'</div></li>';
+      }).join("")+'</ul></li>';
+    }).join("");
+    treeEl.querySelectorAll("[data-key]").forEach(function(el){
+      el.addEventListener("click", function(ev){
+        ev.stopPropagation();
+        var k = el.getAttribute("data-key");
+        var nxt = el.nextElementSibling;
+        if (nxt && nxt.tagName === "UL") {
+          el.classList.toggle("open");
+          nxt.style.display = el.classList.contains("open") ? "" : "none";
+        }
+        location.hash = "#/" + k;
+      });
+    });
+  }
+  renderTree();
+  function findNode(key){
+    for (var i=0;i<TREE.length;i++){
+      if (TREE[i].key === key) return TREE[i];
+      for (var j=0;j<(TREE[i].children||[]).length;j++){
+        var n = TREE[i].children[j];
+        if (n.key === key) return n;
+        for (var k=0;k<(n.children||[]).length;k++) if (n.children[k].key === key) return n.children[k];
+      }
+    }
+    return null;
+  }
+  function crumbFor(key){
+    for (var i=0;i<TREE.length;i++){
+      if (TREE[i].key === key) return TREE[i].label;
+      for (var j=0;j<(TREE[i].children||[]).length;j++){
+        var n = TREE[i].children[j];
+        if (n.key === key) return TREE[i].label + " / " + n.label;
+        for (var k=0;k<(n.children||[]).length;k++) if (n.children[k].key === key) return TREE[i].label + " / " + n.label + " / " + n.children[k].label;
+      }
+    }
+    return "";
+  }
+  function routeTo(key){
+    var n = findNode(key), pg = PAGE[key];
+    if (!n || !pg) { routeTo("timing-hongli"); return; }
+    treeEl.querySelectorAll("[data-key]").forEach(function(el){ el.classList.remove("cur"); });
+    var curEl = treeEl.querySelector('[data-key="'+key+'"]');
+    if (curEl) curEl.classList.add("cur");
+    var parent = curEl ? curEl.parentElement : null;
+    while (parent) {
+      var p0 = parent.previousElementSibling;
+      if (p0 && p0.classList && p0.classList.contains("lv1")) p0.classList.add("open");
+      if (p0 && p0.classList && p0.classList.contains("lv2")) p0.classList.add("open");
+      if (p0 && p0.nextElementSibling) p0.nextElementSibling.style.display = "";
+      parent = parent.parentElement;
+    }
+    if (pg.content) {
+      document.getElementById("view-hongli").style.display = "";
+      document.getElementById("view-empty").style.display = "none";
+      document.title = "红利低波 · 跟投仪表盘";
+      if (btDet && btDet.open && !chartsInited) {
+        setTimeout(function(){ initCharts(); window.dispatchEvent(new Event("resize")); }, 120);
+      } else if (btDet && btDet.open) {
+        window.dispatchEvent(new Event("resize"));
+      }
+    } else {
+      document.getElementById("view-hongli").style.display = "none";
+      document.getElementById("view-empty").style.display = "";
+      document.getElementById("empty-title").textContent = pg.t;
+      document.getElementById("empty-crumb").textContent = crumbFor(key);
+      document.getElementById("empty-desc").textContent = pg.c || "内容建设中。";
+      document.title = pg.t + " · ETF 策略导航";
+    }
+    var sb = document.getElementById("sidebar");
+    if (sb && sb.classList.contains("open")) { sb.classList.remove("open"); document.getElementById("mask").style.display = "none"; }
+  }
+  (function(){
+    var mb = document.getElementById("menu-btn"), sb = document.getElementById("sidebar"), mk = document.getElementById("mask");
+    if (mb && sb && mk) {
+      mb.addEventListener("click", function(){ sb.classList.add("open"); mk.style.display = "block"; });
+      mk.addEventListener("click", function(){ sb.classList.remove("open"); mk.style.display = "none"; });
+    }
+  })();
+  function currentKey(){ var h = (location.hash || "#/timing/hongli").replace(/^#\//, ""); return h.split("/").pop() || "timing-hongli"; }
+  routeTo(currentKey());
+  window.addEventListener("hashchange", function(){ routeTo(currentKey()); });
 
   // ===== header =====
   var stateMap = {"A":"A · 常态满仓","B":"B · 空仓等待回补","C":"C · 125% 加仓中","D":"D · 150% 加仓中"};

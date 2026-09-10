@@ -337,3 +337,24 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
 - DIV_2OF3 WF：三段 30/66/76% vs 30/67/76%，无增益不采纳。
 
 **数字变化说明**：v7.11 +168.2% → v7.12 +285.3% 的 +117pp 全部来自净值按 TR 计价（10 年分红再投 + 杠杆期分红）；交易序列（44 笔）与信号完全不变，仅净值核算口径修正。
+
+## 20. 右侧目录导航改造（v7.13，2026-09-10）
+
+用户要求页面增加可点击目录树，规划多策略产品形态。
+
+**需求结构**：
+- 一级「选ETF」→ 二级 资产配置策略 / 行业轮动策略 / 估值驱动策略 / ETF分类（三级 宽基ETF·中风险 / 行业主题ETF·高风险 / 跨境ETF·高风险）
+- 一级「ETF择时」→ 二级 红利低波（现有完整仪表盘）/ 沪深300 / 中证500
+- 仅红利低波有内容，其余节点一律展示得体空页（不报错、不白屏）
+
+**实现**：
+- `index_template.html`：布局改 `.layout`（flex，主内容 + 右侧 sticky 侧栏 236px）；树渲染由 JS 数据驱动（TREE 常量 + renderTree()），一级/二级可折叠（class open + 箭头旋转），叶子可点击；hash 路由 `#/timing/hongli` 等（三级取 hash 最后一段为 key）；PAGE 常量存空页文案（标题/面包屑/说明）；移动端（≤900px）侧栏变右下角悬浮按钮 + 遮罩抽屉（transform 滑入、visibility/pointer-events 隐藏态）；切回红利低波时若回测折叠区已展开则补 initCharts（避免隐藏容器 0 尺寸）。
+- **PAYLOAD/数据层零改动**（目录是纯前端结构）；策略引擎/口径未动，仅页面外壳。
+- 版本号 v7.12 → v7.13（页面 header）。
+
+**验证**：
+- playwright：默认路由、三级 hash（#/sel-cat/cat-broad）、沪深300、ETF分类、选ETF、非法路由回落、点击目录节点、移动端抽屉开/关——全部通过，无 console 错误。
+- shot.py：桌面无 console 错误/无溢出；移动端 horizontalOverflow 报 sidebar 为 fixed 抽屉设计使然（playwright 实测 scrollWidth==innerWidth==390，抽屉开/关均无真实横向滚动）。
+- 修复过的 bug：三级路由 hash 最初取整串（#/sel-cat/cat-broad → key 不匹配不生效），改为 split("/").pop() 取最后一段。
+
+**发布**：update.py 重生成（数据滚动到 2026-09-09，+286.5%/0.90/−29.0%/44 笔——多一个交易日的正常滚动，非口径变化）→ git commit + push → dispatch daily.yml → 线上 945q5w.gicp.fun 验证（v7.13 标记 + 目录树）。
