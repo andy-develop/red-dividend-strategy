@@ -77,16 +77,17 @@ jobs:
           # 复用已持久化的新资源（若存在）
           RES_ID="${{ secrets.HSK_RESOURCE_ID }}"
           if [ -f data/hsk-resource.json ]; then
-            RES_ID=$(python3 -c "import json; print(json.load(open('data/hsk-resource.json'))['resource_id'])")
+            RES_ID=$(python3 -c "import json; print(json.load(open('data/hsk-resource.json'))['resource_id'])" 2>/dev/null) || true
             echo "复用持久化资源: $RES_ID"
           fi
-          out=$(hsk-cli +host index.html --resource-id "$RES_ID" --format json 2>&1); echo "$out"
+          # set -e 陷阱：hsk-cli 403 时退出码非 0，必须 || true 保住后续 fallback
+          out=$(hsk-cli +host index.html --resource-id "$RES_ID" --format json 2>&1) || true; echo "$out"
           if echo "$out" | grep -q '11301002\|update function is disabled'; then
             echo "== 资源更新被禁用（403 11301002），创建新资源 =="
-            out=$(hsk-cli host index.html --api-key "${{ secrets.HSK_API_KEY }}" --format json 2>&1); echo "$out"
+            out=$(hsk-cli host index.html --api-key "${{ secrets.HSK_API_KEY }}" --format json 2>&1) || true; echo "$out"
           fi
           # 解析并持久化资源 ID/URL（新资源或成功更新均可）
-          echo "$out" > /tmp/hsk-out.txt
+          echo "$out" > /tmp/hsk-out.txt || true
           python3 - <<'EOF'
           import json, re
           out = open("/tmp/hsk-out.txt", encoding="utf-8").read()
