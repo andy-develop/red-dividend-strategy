@@ -445,3 +445,27 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
   2. 创建新资源（hsk-cli host 不带 --resource-id）→ 新 URL，需用户接受换地址或确认能否绑定旧域名
   3. 若 hsk-diag 的 bind 步骤能恢复 update → 自动恢复，URL 不变
 - **线上现状**：945q5w.gicp.fun 仍是 08:00 发布的内容（红利低波 + 行业轮动 12:05 本地数据已 push 到仓库但未上线；页面数据日期 2026-09-10 08:58/12:05 的快照在 index.html 中但线上还是 08:00 版）。
+
+## §27 发布链路最终闭环（2026-09-10）
+
+**结论**：HSK update ticket 对**所有**资源/API key 全局禁用（403 11301002 "update function is disabled"），
+create ticket 可用。用户已拍板"发布为新资源"。最终发布机制与线上地址：
+
+- **线上地址**：`https://i48ya3.gicp.fun/#/sel-sector`（resource_id 1789024233933858716，创建于 CI run 34448604085）
+- **发布机制（daily.yml "Publish to HSK" 步骤）**：
+  1. 数据无变化跳过：比较本次构建 `snapshot.data_date|sector.data_date` 与 `data/hsk-resource.json` 持久化的 data_date，
+     相同则跳过发布（不重复建资源）——generated_at 每次构建都变（bj_now）不可作信号；sha256 因 CI 构建环境差异
+     也不可靠，data_date 随交易日变最稳。
+  2. 有变化：先试 update 持久化资源（期望恢复）→ 403 → 自动 `hsk-cli host` 创建新资源（--api-key）→
+     解析 public_url/public_resource_id（正则优先 public_url 字段，勿匹配输出中的 upload_url）→
+     持久化 data/hsk-resource.json 并 commit push → verify 从持久化 URL 读取比对 data_date。
+  3. set -e 陷阱：hsk-cli 403 退出码非 0 会终止步骤，所有 host 赋值必须 `|| true`。
+- **verify 步骤**：比对线上/本地 `snapshot.data_date|sector.data_date`（不再比 generated_at）。
+- **CI 关键凭据**：secrets HSK_API_KEY=本地 ~/.hsk/api_key.json 的 file_hosting key（ph_key_0d97c...，create 可用）；
+  HSK_RESOURCE_ID=1789024233933858716。本地 hsk-cli host 也可创建（走 api_key.json 优先）。
+- **验证结果**：run 34452263016 全绿（update 幂等 → commit → 发布跳过 → verify 通过）。
+  线上 i48ya3 数据：持仓 有色/煤炭/农业/消费 各 12.5%，累计 +116.33% / CAGR 9.29% / 夏普 0.60 /
+  回撤 -31.6% / 年换手 4.51 / 537 笔——与终版回测一致。
+- **旧 URL 945q5w.gicp.fun**：HSK 侧 update 禁用无法更新，保持 08:00 旧版（无 sector 视图）；用户接受新 URL。
+- **遗留注意**：每次数据变化（交易日新数据）都会创建新资源 → 新 URL；无数据变化不重复创建。
+  若 HSK 恢复 update，发布步骤会自动回归 update 路径（URL 稳定）。
