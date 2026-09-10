@@ -383,3 +383,10 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
 - `.sidebar` flex 0 0 236px → **192px**；树内 lv2 缩进 24→18px、lv3 缩进 40→28px、lv3 字号 13→12.5px、risk 标签缩小（10.5→10px、margin 6→4px），lv3 实测无溢出。
 - 主内容宽 960→916px（布局总宽 1180 不变，留白给间距）。
 - 验证：桌面无 console 错误/无溢出；实测 sbW=192、gap=40、lv3Overflow=false；移动端 drawer 不受影响。
+
+## 24. ①-⑤ 小标题再增强 + 修复未闭合 CSS 注释（v7.13 修订，2026-09-10）
+
+用户要求小标题再醒目些、每个模块上方留空行。
+- `.sec-t` 17px/800 + 浅蓝渐变胶囊底（rgba 蓝 0.12→0.03）+ 1px 蓝边；编号徽章 26→28px；`section + section{margin-top:34px}`（②③④⑤ 上方留 34px 空行，① 与 header 保持现状）。
+- **【重要修复】v7.13 起存在的未闭合 CSS 注释**：`/*（640px 下的字号微调合并到下方统一 @media）` 无 `*/`，导致 `.brand` 之后**全部主样式规则**（header h1/.badge/.card 边框背景/.action-box/gauge/pos-grid/details/回测表/页脚等）被浏览器当注释吞掉——此前多轮"视觉增强"实际从未渲染（页面靠 body 默认白底 + 浏览器默认字号维持外观，h1 30px 实为默认 2em）。修复：删除该注释行及游离 `}`。实测：sec-t 17px/渐变/1px 边框、徽章 28px、h1 24px、card 边框 1px、模块间距 34px 全部生效；页面高度 1748→2082px（样式恢复的副产物）。
+- 自检盲区教训：shot.py 只检 console 错误/溢出，测不出"规则被吞"；CSS 改动后必须验证 computed style 真实生效。
