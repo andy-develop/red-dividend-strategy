@@ -16,7 +16,7 @@
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;font-size:15px;line-height:1.6}
-/* ===== 布局：主内容 + 右侧目录（v7.13） ===== */
+/* ===== 布局：主内容 + 左侧目录（v7.13b） ===== */
 .layout{max-width:1180px;margin:0 auto;padding:18px 16px 40px;display:flex;gap:20px;align-items:flex-start}
 .main{flex:1 1 auto;min-width:0}
 .view{min-width:0}
@@ -55,27 +55,29 @@ body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft 
 /*（640px 下的字号微调合并到下方统一 @media）
 }
 .brand{font-size:13px;color:var(--sub)}
-header h1{font-size:20px;font-weight:700;flex:1 1 100%}
+header h1{font-size:24px;font-weight:800;flex:1 1 100%;letter-spacing:.5px}
 .badge{padding:3px 12px;border-radius:999px;font-size:13px;font-weight:600}
 .b-ok{background:#E4F5EA;color:#177245}.b-warn{background:#FDF0DC;color:#B45309}.b-danger{background:#FDE8E8;color:#C0392B}
 .meta{font-size:12.5px;color:var(--dim);flex:1 1 100%;display:flex;flex-wrap:wrap;gap:4px 16px}
 .meta b{color:var(--ink2)}
-section{margin-bottom:18px}
-.sec-t{font-size:13px;font-weight:700;color:var(--blue);margin-bottom:10px;letter-spacing:.5px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+section{margin-bottom:22px}
+.sec-t{font-size:15.5px;font-weight:800;color:var(--blue);margin-bottom:12px;letter-spacing:.4px;display:flex;align-items:center;gap:9px}
+.sec-t::before{content:"";flex:0 0 4px;height:17px;border-radius:3px;background:linear-gradient(180deg,#2B6CB0,#6FA8DC)}
+.sec-n{flex:0 0 26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#2B6CB0,#4A8FD4);color:#fff;font-size:13.5px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(43,108,176,.28)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 3px 14px rgba(43,108,176,.08)}
 /* ===== ① 今天做什么 ===== */
 .action-box{border-radius:18px;padding:22px 20px;background:linear-gradient(135deg,#F0F7FE,#FFFFFF);border:1.5px solid var(--blue);box-shadow:0 2px 10px rgba(43,108,176,.08)}
 .action-box.act-buy{border-color:var(--up);background:linear-gradient(135deg,#FDF1F0,#FFFFFF)}
 .action-box.act-sell{border-color:var(--down);background:linear-gradient(135deg,#ECF7F0,#FFFFFF)}
 .action-box.act-hold{border-color:var(--blue);background:linear-gradient(135deg,#F0F7FE,#FFFFFF)}
-.action-title{font-size:24px;font-weight:800;margin-bottom:6px}
+.action-title{font-size:20px;font-weight:800;margin-bottom:6px}
 .action-sub{font-size:14px;color:var(--ink2);margin-bottom:12px}
 .action-meta{font-size:13px;color:var(--sub);border-top:1px dashed var(--line);padding-top:10px}
 .action-meta b{color:var(--blue)}
 /* ===== ② 温度计 ===== */
 .gauge-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
 .gauge-txt{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-.gauge-word{font-size:24px;font-weight:800}
+.gauge-word{font-size:20px;font-weight:800}
 .gauge-num{font-size:15px;color:var(--sub)}
 .gauge{position:relative;height:22px;border-radius:999px;background:linear-gradient(90deg,#16A34A 0%,#84CC16 22%,#EAB308 45%,#F97316 68%,#E0443C 88%,#B91C1C 100%);box-shadow:inset 0 1px 3px rgba(0,0,0,.12)}
 .gauge-ptr{position:absolute;top:-5px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:12px solid #16324F;transform:translateX(-50%);transition:left .6s ease}
@@ -175,7 +177,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 
   <!-- ① 今天做什么 -->
   <section>
-    <div class="sec-t">① 今天做什么</div>
+    <div class="sec-t"><span class="sec-n">①</span>今天做什么</div>
     <div class="action-box" id="action-box">
       <div class="action-title" id="act-title">—</div>
       <div class="action-sub" id="act-sub">—</div>
@@ -185,7 +187,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 
   <!-- ② 市场情绪温度计 -->
   <section>
-    <div class="sec-t">② 市场情绪温度计</div>
+    <div class="sec-t"><span class="sec-n">②</span>市场情绪温度计</div>
     <div class="gauge-card">
       <div class="gauge-txt"><span class="gauge-word" id="g-word">—</span><span class="gauge-num" id="g-num">—</span></div>
       <div class="gauge"><div class="gauge-ptr" id="g-ptr"></div></div>
@@ -198,7 +200,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 
   <!-- ③ 我的仓位 -->
   <section>
-    <div class="sec-t">③ 我的仓位 · 照这个金额操作</div>
+    <div class="sec-t"><span class="sec-n">③</span>我的仓位 · 照这个金额操作</div>
     <div class="card">
       <div class="capital-row">
         <label for="capital">我的本金（元）</label>
@@ -223,7 +225,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 
   <!-- ④ 策略概览（给用户全貌和预期） -->
   <section>
-    <div class="sec-t">④ 策略概览 · 这套策略平时怎么操作（先看这个）</div>
+    <div class="sec-t"><span class="sec-n">④</span>策略概览 · 这套策略平时怎么操作（先看这个）</div>
     <div class="card">
       <div class="ov-hero">总体思想：<b>满仓 + 超跌抄底</b></div>
       <div style="font-size:13.5px;color:var(--ink2);line-height:1.7;margin-top:10px">
@@ -244,7 +246,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 
   <!-- ⑤ 进阶（默认折叠） -->
   <section>
-    <div class="sec-t">⑤ 为什么 / 回测证据 / 术语（想深究再展开）</div>
+    <div class="sec-t"><span class="sec-n">⑤</span>为什么 / 回测证据 / 术语（想深究再展开）</div>
 
     <details>
       <summary>为什么今天这么说（信号明细）</summary>

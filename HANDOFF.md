@@ -365,3 +365,13 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
 - DOM：`<aside class="sidebar">` 从 main 之后移到 main 之前（flex 布局左→右，桌面目录即居左，sticky 不变）。
 - 移动端抽屉反向：`right:0; translateX(102%)` → `left:0; translateX(-102%)`（从左滑入），阴影方向 `-6px → 6px`，悬浮按钮 `right:14px → left:14px`（左下角）。
 - 验证：桌面 sidebar 左缘 146 < main 左缘 402（目录在左）；移动端抽屉 left 0→right 270 从左侧滑入、开/关无横向滚动（scrollWidth==390）；shot.py 桌面无错误/无溢出。
+
+## 22. ①-⑤ 板块视觉增强（v7.13 修订，2026-09-10）
+
+用户要求五个板块在 UI 上更醒目、超过其他网页内容，但不超过总标题。
+- 总标题 h1：20px/700 → **24px/800**（保持页面最高层级）。
+- 板块标题 .sec-t：13px → **15.5px/800** + 左侧渐变蓝竖条 + **蓝色编号徽章**（.sec-n 26×26 圆角块，白字 ①-⑤）。
+- ① 内结论 .action-title 与 ② 温度计 .gauge-word：24px → **20px**（不越过总标题）。
+- section 间距 18→22px；.card 加微阴影（0 3px 14px rgba(43,108,176,.08)）。
+- 左侧目录（13.5-14px）与页脚（12px）保持不变，视觉上被 ①-⑤ 压过。
+- 验证：playwright 桌面/移动字号层级 h1(30px 移动渲染) > action(20) > sec-t(15)；无 console 错误、无横向滚动。
