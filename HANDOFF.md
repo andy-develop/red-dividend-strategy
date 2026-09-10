@@ -375,3 +375,11 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
 - section 间距 18→22px；.card 加微阴影（0 3px 14px rgba(43,108,176,.08)）。
 - 左侧目录（13.5-14px）与页脚（12px）保持不变，视觉上被 ①-⑤ 压过。
 - 验证：playwright 桌面/移动字号层级 h1(30px 移动渲染) > action(20) > sec-t(15)；无 console 错误、无横向滚动。
+
+## 23. 布局间距与目录宽度微调（v7.13 修订，2026-09-10）
+
+用户要求目录与主内容间距放大一倍、目录本身再窄些。
+- `.layout` gap 20px → **40px**（翻倍）。
+- `.sidebar` flex 0 0 236px → **192px**；树内 lv2 缩进 24→18px、lv3 缩进 40→28px、lv3 字号 13→12.5px、risk 标签缩小（10.5→10px、margin 6→4px），lv3 实测无溢出。
+- 主内容宽 960→916px（布局总宽 1180 不变，留白给间距）。
+- 验证：桌面无 console 错误/无溢出；实测 sbW=192、gap=40、lv3Overflow=false；移动端 drawer 不受影响。
