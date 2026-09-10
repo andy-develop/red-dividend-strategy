@@ -49,7 +49,7 @@ FETCH_START = "20130719"
 ARCHIVE_DIR = os.path.join(BASE, "data")
 
 
-def fetch_index(code, start, end, retries=4):
+def fetch_index(code, start, end, retries=6):
     url = ("https://www.csindex.com.cn/csindex-home/perf/index-perf?"
            f"indexCode={code}&startDate={start}&endDate={end}")
     last = None
@@ -63,8 +63,7 @@ def fetch_index(code, start, end, retries=4):
                 return rows
         except Exception as e:
             last = e
-        time.sleep(2.0 + 2.0 * k)
-    raise RuntimeError(f"fetch {code} failed: {last}")
+        time.sleep(2.0 + 2.5 * k + 0.5 * ((k * 7919) % 10))   # 指数退避 + 抖动（CI 境外 IP 偶发连接重置）
 
 
 def load_prices(archive=True):
