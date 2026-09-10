@@ -44,10 +44,9 @@ jobs:
           python3 update.py
           SECTOR_QUICK=1 python3 sector_update.py --fetch-only /tmp/sector-raw.json || true
           if [ ! -s /tmp/sector-raw.json ]; then
-            echo "行业轮动抓取失败（东财限流/封锁），回退到最新归档..."
-            RAW=$(ls -t data/sector-raw-*.json.gz | head -1)
-            echo "使用归档: $RAW"
-            python3 -c "import gzip,json,sys; json.dump(json.load(gzip.open('$RAW', 'rt', encoding='utf-8')), open('/tmp/sector-raw.json','w',encoding='utf-8'), ensure_ascii=False)"
+            echo "行业轮动抓取失败（东财限流/封锁），重建最近基线（周归档+增量）..."
+            python3 -c "import json, sys; sys.path.insert(0, '.'); import sector_update as S; raw, day, mode = S.rebuild_base(); json.dump(raw, open('/tmp/sector-raw.json','w',encoding='utf-8'), ensure_ascii=False); print('基线', day, 'mode=', mode)" || python3 -c "import json, sys; sys.path.insert(0, '.'); import sector_update as S; raw, day, mode = S.rebuild_base(); print('FAIL', day, mode)"
+            test -s /tmp/sector-raw.json
           fi
           python3 sector_update.py --raw /tmp/sector-raw.json --dry-run --out /tmp/dry-sector-index.html --data-out /tmp/dry-sector-data.json
           python3 sector_update.py --raw /tmp/sector-raw.json --dry-run --out /tmp/dry-sector-index2.html --data-out /tmp/dry-sector-data2.json

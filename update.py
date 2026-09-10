@@ -10,7 +10,7 @@
 
 用法: python3 update.py [--out index.html] [--data-out backtest_data.json]
 """
-import json, os, sys, time, datetime
+import json, os, sys, time, datetime, glob
 import urllib.request
 import pandas as pd
 
@@ -50,6 +50,8 @@ ARCHIVE_DIR = os.path.join(BASE, "data")
 
 
 def fetch_index(code, start, end, retries=6):
+    if start > end:
+        return []   # 增量区间为空（基线已是最新）：合法无数据，不请求
     url = ("https://www.csindex.com.cn/csindex-home/perf/index-perf?"
            f"indexCode={code}&startDate={start}&endDate={end}")
     last = None
@@ -59,20 +61,105 @@ def fetch_index(code, start, end, retries=6):
             with urllib.request.urlopen(req, timeout=40) as r:
                 j = json.loads(r.read().decode("utf-8"))
             rows = j.get("data") or []
-            if rows:
-                return rows
+            if rows or start != FETCH_START:
+                return rows   # 增量区间为空（节假日/未刷新）也合法返回
         except Exception as e:
             last = e
         time.sleep(2.0 + 2.5 * k + 0.5 * ((k * 7919) % 10))   # 指数退避 + 抖动（CI 境外 IP 偶发连接重置）
+    raise RuntimeError(f"fetch CSI {code} failed: {last}")
+
+
+# ---- 增量更新（v7.15）：基线=最近全量周归档 + 其后每日增量，每次只抓增量区间 ----
+FULL_EVERY_DAYS = 7     # 基线陈旧超该天数 → 全量重抓
+KEEP_INCR = 30          # 增量归档保留个数
+KEEP_WEEK = 2           # 全量周归档保留个数
+
+
+def _hl_archive_date(name, code):
+    # 兼容 H20269-week-YYYYMMDD.json / H20269-incr-YYYYMMDD.json / 旧 H20269-YYYYMMDD.json
+    return datetime.datetime.strptime(
+        os.path.basename(name).split(f"{code}-")[1].split(".")[0].split("-")[-1], "%Y%m%d").date()
+
+
+def rebuild_hl():
+    """重建最近完整基线（H20269/H30269）：周归档全量 + 其后每日增量合并（确定性）。
+    兼容旧格式 H20269-YYYYMMDD.json（一次性迁移基线）。
+    返回 ({code: rows}, base_day)；无任何归档返回 (None, None)。"""
+    out = {}
+    base_day = None
+    for code in ("H20269", "H30269"):
+        weeks = sorted(glob.glob(os.path.join(ARCHIVE_DIR, f"{code}-week-*.json")))
+        rows, day = [], None
+        if weeks:
+            d = json.load(open(weeks[-1], encoding="utf-8"))
+            rows = d["rows"]
+            day = _hl_archive_date(weeks[-1], code)
+            for incr in sorted(glob.glob(os.path.join(ARCHIVE_DIR, f"{code}-incr-*.json"))):
+                iday = _hl_archive_date(incr, code)
+                if iday <= day:
+                    continue
+                d2 = json.load(open(incr, encoding="utf-8"))
+                dmap = {r["tradeDate"]: r for r in rows}
+                for r in d2["rows"]:
+                    dmap[r["tradeDate"]] = r
+                rows = [dmap[k] for k in sorted(dmap)]
+                day = max(day, iday)
+        else:
+            # 旧全量格式 H20269-YYYYMMDD.json（迁移基线）
+            for p in sorted(glob.glob(os.path.join(ARCHIVE_DIR, f"{code}-????????.json")), reverse=True):
+                try:
+                    d = json.load(open(p, encoding="utf-8"))
+                except Exception:
+                    continue
+                if d.get("indexCode") == code and d.get("rows"):
+                    rows = d["rows"]
+                    day = _hl_archive_date(p, code)
+                    break
+        if not rows:
+            return None, None
+        out[code] = rows
+        base_day = day if base_day is None else min(base_day, day)
+    return out, base_day
 
 
 def load_prices(archive=True):
-    """在线抓取 H20269(全收益) 与 H30269(价格)，对齐为 df(date/close/px)。
-    原始响应按日期存档到 data/（当日不可变输入，供复现核对）；返回 (df, raw, paths)。"""
+    """在线抓取 H20269(全收益) 与 H30269(价格)：增量模式（基线+增量区间合并，指数无前复权问题，
+    拼接安全）；无基线或基线陈旧 → 全量。原始响应按类型归档 data/（周全量 / 日增量，供复现核对）。
+    返回 (df, raw, paths)。"""
+    import glob
     today = datetime.date.today()
     end = today.strftime("%Y%m%d")
-    tr_rows = fetch_index("H20269", FETCH_START, end)
-    px_rows = fetch_index("H30269", FETCH_START, end)
+    base, base_day = rebuild_hl()
+    mode = "full"
+    incr_rows = None
+    if base is None:
+        print("[增量] 无基线归档，全量抓取（首次）")
+        tr_rows = fetch_index("H20269", FETCH_START, end)
+        px_rows = fetch_index("H30269", FETCH_START, end)
+    elif (today - base_day).days > FULL_EVERY_DAYS:
+        print(f"[增量] 基线 {base_day} 陈旧 >{FULL_EVERY_DAYS} 天，全量重抓建立新周基线")
+        tr_rows = fetch_index("H20269", FETCH_START, end)
+        px_rows = fetch_index("H30269", FETCH_START, end)
+    else:
+        mode = "incr"
+        start = (base_day + datetime.timedelta(days=1)).strftime("%Y%m%d")
+        if start > end:
+            print(f"[增量] 基线 {base_day} 已是最新，无增量区间，沿用基线")
+            tr_rows, px_rows = base["H20269"], base["H30269"]
+            incr_rows = {"H20269": [], "H30269": []}
+        else:
+            print(f"[增量] 基线 {base_day}，只抓 {start} 至今的增量区间")
+            tr_new = fetch_index("H20269", start, end)
+            px_new = fetch_index("H30269", start, end)
+            tr = {r["tradeDate"]: r for r in base["H20269"]}
+            for r in tr_new:
+                tr[r["tradeDate"]] = r
+            px = {r["tradeDate"]: r for r in base["H30269"]}
+            for r in px_new:
+                px[r["tradeDate"]] = r
+            tr_rows = [tr[k] for k in sorted(tr)]
+            px_rows = [px[k] for k in sorted(px)]
+            incr_rows = {"H20269": tr_new, "H30269": px_new}
     tr = {r["tradeDate"]: r["close"] for r in tr_rows}
     px = {r["tradeDate"]: r["close"] for r in px_rows}
     dates = sorted(set(tr) & set(px))
@@ -83,11 +170,24 @@ def load_prices(archive=True):
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
         day = today.strftime("%Y%m%d")
         paths = []
-        for code, rows in (("H20269", tr_rows), ("H30269", px_rows)):
-            p = os.path.join(ARCHIVE_DIR, f"{code}-{day}.json")
+        for code in ("H20269", "H30269"):
+            if mode == "full":
+                p = os.path.join(ARCHIVE_DIR, f"{code}-week-{day}.json")
+                rows = tr_rows if code == "H20269" else px_rows
+            else:
+                p = os.path.join(ARCHIVE_DIR, f"{code}-incr-{day}.json")
+                rows = incr_rows[code]
             with open(p, "w", encoding="utf-8") as f:
                 json.dump({"date": day, "indexCode": code, "rows": rows}, f, ensure_ascii=False)
             paths.append(p)
+        # 滚动清理（git 树体积可控）
+        for code in ("H20269", "H30269"):
+            for pat, keep in ((f"{code}-incr-*.json", KEEP_INCR), (f"{code}-week-*.json", KEEP_WEEK)):
+                for p in sorted(glob.glob(os.path.join(ARCHIVE_DIR, pat)))[:-keep]:
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
         return df, tr_rows, px_rows, paths
     return df, tr_rows, px_rows, None
 

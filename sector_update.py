@@ -11,9 +11,21 @@
 → 与现有 index.html 中的红利低波 payload 合并注入（carry-forward，互不覆盖）
 → 原始响应与当日快照归档 data/（可复现、可审计）
 
+增量更新（v1.1，避免每次全量重抓）：
+  基线 = 最近一次全量周归档 data/sector-week-<date>.json.gz + 其后每日增量
+        data/sector-incr-<date>.json.gz（重建为完整 raw，确定性）
+  每次抓取只请求 beg=基线末日+1 的增量区间（每 ETF ~几十行，而非全量几千行）：
+    - 前复权刻度检测：增量首日与基线末日收盘价跳变 >11% → 期间除权、历史刻度失效 → 该 ETF 全量兜底
+    - 缺口检测：增量首日与基线末日间隔 >10 自然日 → 该 ETF 全量兜底
+    - 基线陈旧 > FULL_EVERY_DAYS(7) 天或无基线 → 全量重抓（周基线轮换）
+    - SECTOR_QUICK=1（CI）：增量请求失败直接沿用基线行（发布不中断），由 workflow 归档回退双保险
+  归档治理：incr 保留最近 30 个、week 保留最近 2 个，其余本地删除（git 树体积可控）；
+  旧格式 data/sector-raw-<date>.json.gz 作为一次性迁移基线自动兼容。
+
 用法: python3 sector_update.py [--out index.html] [--data-out sector_data.json] [--dry-run]
+                     [--raw data/sector-week-....json.gz] [--fetch-only /tmp/raw.json]
 """
-import json, os, sys, datetime, gzip, time
+import json, os, sys, datetime, gzip, time, glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +54,9 @@ ARCHIVE_DIR = os.path.join(BASE, "data")
 
 FETCH_WORKERS = 3      # ETF 并发抓取（东财限流明显；全局限流器 + 指数退避见 sector_universe）
 FETCH_RETRIES = 6      # 单只 ETF 失败重试次数（含退避 2s×(k+1)）
+FULL_EVERY_DAYS = 7    # 基线陈旧超过该天数 → 全量重抓（周基线轮换）
+KEEP_INCR = 30         # 增量归档保留个数
+KEEP_WEEK = 2          # 全量周归档保留个数
 
 
 def bj_now():
@@ -49,6 +64,90 @@ def bj_now():
     if _DRY:
         return "dry-run"
     return (datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))).strftime("%Y-%m-%d %H:%M")
+
+
+# ============ 增量归档：基线重建 / 合并（纯函数，单测覆盖） ============
+
+def _kl_date(row):
+    """klines 行首列日期（YYYY-MM-DD）。"""
+    return row.split(",")[0]
+
+
+def merge_klines(old, new_rows):
+    """按日期合并 klines 行（新行覆盖同日旧行），升序返回。"""
+    d = {_kl_date(r): r for r in old}
+    for r in new_rows:
+        d[_kl_date(r)] = r
+    return [d[k] for k in sorted(d)]
+
+
+def kline_gap_days(old, new_rows):
+    """增量首日与基线末日间隔（自然日）；无任一侧返回 0。"""
+    if not old or not new_rows:
+        return 0
+    last_old = datetime.date.fromisoformat(_kl_date(old[-1]))
+    first_new = datetime.date.fromisoformat(_kl_date(new_rows[0]))
+    return (first_new - last_old).days
+
+
+def kline_scale_jump(old, new_rows, tol=0.11):
+    """前复权刻度检测：基线末日与增量首日收盘价跳变 ≥ tol → 期间除权、历史刻度已失效，需全量兜底。
+    （fqt=1 前复权以最新价为基准回溯调整，除权后旧基线整体刻度过期，增量拼接会产生价格断层）"""
+    if not old or not new_rows:
+        return False
+    p_old = float(old[-1].split(",")[2])
+    p_new = float(new_rows[0].split(",")[2])
+    return p_old > 0 and abs(p_new / p_old - 1.0) >= tol
+
+
+def merge_csi(old, new_rows):
+    """按 tradeDate 合并 csi rows（新覆盖旧），升序返回。"""
+    d = {r["tradeDate"]: r for r in old}
+    for r in new_rows:
+        d[r["tradeDate"]] = r
+    return [d[k] for k in sorted(d)]
+
+
+def load_raw(path):
+    if path.endswith(".gz"):
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return json.load(f)
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _fdate(name, prefix):
+    """从归档文件名解析日期。如 sector-week-20260910.json.gz -> date(2026,9,10)。"""
+    return datetime.datetime.strptime(os.path.basename(name).split(prefix)[1].split(".")[0], "%Y%m%d").date()
+
+
+def rebuild_base():
+    """重建最近完整基线：最新周归档 + 其后每日增量（确定性合并）。
+    兼容旧格式 data/sector-raw-<date>.json.gz（一次性迁移基线，增量照常）。
+    返回 (raw, base_day, mode)；mode ∈ full | incr | migrate | none。"""
+    weeks = sorted(glob.glob(os.path.join(ARCHIVE_DIR, "sector-week-*.json.gz")))
+    if weeks:
+        p = weeks[-1]
+        day = _fdate(p, "sector-week-")
+        raw = load_raw(p)
+        for incr in sorted(glob.glob(os.path.join(ARCHIVE_DIR, "sector-incr-*.json.gz"))):
+            iday = _fdate(incr, "sector-incr-")
+            if iday <= day:
+                continue
+            d = load_raw(incr)
+            for code, rows in d.get("etfs", {}).items():
+                if code not in raw["etfs"]:
+                    raw["etfs"][code] = {"industry": "", "name": "", "klines": []}
+                old = raw["etfs"][code].get("klines", [])
+                raw["etfs"][code]["klines"] = merge_klines(old, rows)
+            for c, rows in d.get("csi", {}).items():
+                raw["csi"][c] = merge_csi(raw.get("csi", {}).get(c, []), rows)
+            day = max(day, iday)
+        return raw, day, "incr"
+    old = sorted(glob.glob(os.path.join(ARCHIVE_DIR, "sector-raw-*.json.gz")))
+    if old:
+        return load_raw(old[-1]), _fdate(old[-1], "sector-raw-"), "migrate"
+    return None, None, "none"
 
 
 def fetch_all():
@@ -84,6 +183,117 @@ def fetch_all():
     for c in ("H00300", "000300"):
         raw["csi"][c] = U.fetch_csi_index(c)
     return raw
+
+
+def fetch_incremental():
+    """增量抓取（v1.1）：基线=重建的最近完整归档，只请求 beg=基线末日+1 的增量区间。
+    返回 (raw, mode, incr)；incr 为增量行 dict（供归档，full 时为 None）。"""
+    base_raw, base_day, mode = rebuild_base()
+    if base_raw is None:
+        print("[增量] 无基线归档，首次全量抓取")
+        return fetch_all(), "full", None
+    if (datetime.date.today() - base_day).days > FULL_EVERY_DAYS:
+        print(f"[增量] 基线 {base_day} 陈旧 >{FULL_EVERY_DAYS} 天，全量重抓建立新周基线")
+        return fetch_all(), "full", None
+    print(f"[增量] 基线 {base_day}（mode={mode}），只抓 beg={base_day + datetime.timedelta(days=1):%Y%m%d} 至今的增量区间")
+    quick = os.environ.get("SECTOR_QUICK")
+    raw = {"fetched_at": bj_now(), "etfs": {}, "csi": {}, "failures": []}
+    incr = {"date": datetime.date.today().strftime("%Y%m%d"), "base": os.path.basename(
+        sorted(glob.glob(os.path.join(ARCHIVE_DIR, "sector-week-*.json.gz")))[-1]) if glob.glob(
+        os.path.join(ARCHIVE_DIR, "sector-week-*.json.gz")) else "legacy",
+        "etfs": {}, "csi": {}}
+    start = (base_day + datetime.timedelta(days=1)).strftime("%Y%m%d")
+    if start > datetime.date.today().strftime("%Y%m%d"):
+        # 基线已是最新（如当日 CI 与本地先后触发）：无增量区间，沿用基线
+        print(f"[增量] 基线 {base_day} 已是最新，无增量区间，沿用基线数据")
+        return base_raw, "incr", incr
+
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
+        futs = {ex.submit(U.fetch_em_kline, code, start=start, retries=FETCH_RETRIES): (ind, code, name)
+                for ind, code, name in U.ALL_ETFS}
+        for f in as_completed(futs):
+            ind, code, name = futs[f]
+            old = base_raw["etfs"].get(code, {}).get("klines", [])
+            try:
+                new_rows = f.result()["klines"]
+                if kline_scale_jump(old, new_rows) or kline_gap_days(old, new_rows) > 10:
+                    # 前复权刻度失效（除权）或缺口的 ETF：全量兜底重抓
+                    d2 = U.fetch_em_kline(code, start=U.FETCH_START, retries=FETCH_RETRIES)
+                    merged = d2["klines"]
+                    incr["etfs"][code] = d2["klines"]
+                    print(f"      {code} {name} 刻度/缺口检测触发，全量兜底（{len(merged)} 行）")
+                else:
+                    merged = merge_klines(old, new_rows)
+                    incr["etfs"][code] = new_rows
+                raw["etfs"][code] = {"industry": ind, "name": name, "klines": merged}
+            except Exception as exc:
+                if quick and old:
+                    # CI 快速失败：沿用基线行，保证发布不中断（数据日期=基线日期）
+                    raw["etfs"][code] = {"industry": ind, "name": name, "klines": old}
+                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:120]})
+                    print(f"  [快速回退] {code} {name} 增量失败，沿用基线 {base_day} 数据：{str(exc)[:90]}")
+                else:
+                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:160]})
+                    print(f"  [失败] {code} {name}（{ind}）：{str(exc)[:120]}")
+    # 非 quick：失败项冷却一轮重试（保持鲁棒性）
+    if not quick and raw["failures"]:
+        pending = [(f["industry"], f["code"], f["name"]) for f in raw["failures"]]
+        print(f"      冷却 8s 后重试 {len(pending)} 只失败 ETF...")
+        time.sleep(8)
+        raw["failures"] = []
+        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
+            futs = {ex.submit(U.fetch_em_kline, code, start=start, retries=FETCH_RETRIES): (ind, code, name)
+                    for ind, code, name in pending}
+            for f in as_completed(futs):
+                ind, code, name = futs[f]
+                old = base_raw["etfs"].get(code, {}).get("klines", [])
+                try:
+                    new_rows = f.result()["klines"]
+                    if kline_scale_jump(old, new_rows) or kline_gap_days(old, new_rows) > 10:
+                        merged = U.fetch_em_kline(code, start=U.FETCH_START, retries=FETCH_RETRIES)["klines"]
+                        incr["etfs"][code] = merged
+                    else:
+                        merged = merge_klines(old, new_rows)
+                        incr["etfs"][code] = new_rows
+                    raw["etfs"][code] = {"industry": ind, "name": name, "klines": merged}
+                except Exception as exc:
+                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:160]})
+                    print(f"  [失败] {code} {name}（{ind}）：{str(exc)[:120]}")
+    # 沪深300（中证无前复权问题，纯合并；失败沿用基线）
+    for c in ("H00300", "000300"):
+        old = base_raw.get("csi", {}).get(c, [])
+        try:
+            new_rows = U.fetch_csi_index(c, start=start)
+            raw["csi"][c] = merge_csi(old, new_rows)
+            incr["csi"][c] = new_rows
+        except Exception as exc:
+            raw["csi"][c] = old
+            raw["failures"].append({"code": c, "name": c, "industry": "CSI", "error": str(exc)[:120]})
+            print(f"  [快速回退] {c} 增量失败，沿用基线数据：{str(exc)[:90]}")
+    return raw, "incr", incr
+
+
+def archive_incremental(mode, raw, incr):
+    """增量/全量归档 + 滚动清理（incr 保留 KEEP_INCR、week 保留 KEEP_WEEK）。"""
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    day = datetime.date.today().strftime("%Y%m%d")
+    if mode == "full":
+        p = os.path.join(ARCHIVE_DIR, f"sector-week-{day}.json.gz")
+        with gzip.open(p, "wt", encoding="utf-8") as f:
+            json.dump(raw, f, ensure_ascii=False)
+        print(f"      全量周归档 {p}")
+    elif mode == "incr" and incr is not None:
+        p = os.path.join(ARCHIVE_DIR, f"sector-incr-{day}.json.gz")
+        with gzip.open(p, "wt", encoding="utf-8") as f:
+            json.dump(incr, f, ensure_ascii=False)
+        print(f"      增量归档 {p}（ETF {len(incr.get('etfs', {}))} 只 / CSI {len(incr.get('csi', {}))}）")
+    # 滚动清理
+    for pat, keep in (("sector-incr-*.json.gz", KEEP_INCR), ("sector-week-*.json.gz", KEEP_WEEK)):
+        for p in sorted(glob.glob(os.path.join(ARCHIVE_DIR, pat)))[:-keep]:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 def validate(raw):
@@ -192,11 +402,11 @@ def archive(raw, payload):
 
 def main():
     if _FETCH_ONLY:
-        # CI 用：只抓取+硬校验，原始 JSON 写盘，供 --raw 三跑共用（抓取量 3×→1×，规避限流放大）
-        print("[fetch-only] 抓取 21 行业 × 30 ETF + 沪深300（并发 {}）...".format(FETCH_WORKERS))
-        raw = fetch_all()
+        # CI 用：增量抓取+硬校验，原始 JSON 写盘，供 --raw 三跑共用（抓取量 3×→1×，且只抓增量区间）
+        print("[fetch-only] 增量抓取 21 行业 × 30 ETF + 沪深300（并发 {}）...".format(FETCH_WORKERS))
+        raw, mode, incr = fetch_incremental()
         etfs_ok = len(raw["etfs"])
-        print(f"      ETF 成功 {etfs_ok}/{len(U.ALL_ETFS)}；失败 {len(raw['failures'])}；"
+        print(f"      ETF 有效 {etfs_ok}/{len(U.ALL_ETFS)}；失败 {len(raw['failures'])}；"
               f"CSI 全收益/价格 {len(raw['csi'].get('H00300', []))}/{len(raw['csi'].get('000300', []))} 条")
         ok_inds, ratio, issues = validate(raw)
         print(f"      有效行业 {ok_inds}/{len(U.INDUSTRY_LIST)}（{ratio:.0%}）")
@@ -205,18 +415,14 @@ def main():
         with open(_FETCH_ONLY, "w", encoding="utf-8") as f:
             json.dump(raw, f, ensure_ascii=False)
         print(f"      原始数据已写 {_FETCH_ONLY}")
+        archive_incremental(mode, raw, incr)
         return
     if _RAW:
         print(f"[1/4] 使用归档原始数据重跑（{_RAW}，跳过抓取）...")
-        if _RAW.endswith(".gz"):
-            with gzip.open(_RAW, "rt", encoding="utf-8") as f:
-                raw = json.load(f)
-        else:
-            with open(_RAW, encoding="utf-8") as f:
-                raw = json.load(f)
+        raw = load_raw(_RAW)
     else:
-        print("[1/4] 抓取 21 行业 × 30 ETF + 沪深300（并发 {}）...".format(FETCH_WORKERS))
-        raw = fetch_all()
+        print("[1/4] 增量抓取 21 行业 × 30 ETF + 沪深300（并发 {}）...".format(FETCH_WORKERS))
+        raw, mode, incr = fetch_incremental()
     etfs_ok = len(raw["etfs"])
     print(f"      ETF 成功 {etfs_ok}/{len(U.ALL_ETFS)}；失败 {len(raw['failures'])}；"
           f"CSI 全收益/价格 {len(raw['csi'].get('H00300', []))}/{len(raw['csi'].get('000300', []))} 条")
@@ -256,8 +462,20 @@ def main():
         json.dump(payload, f, ensure_ascii=False)
     print(f"      sector_data.json 已生成 -> {DATA_OUT}")
     if not _DRY:
-        rp, sp = archive(raw, payload)
-        print(f"      输入归档 {rp}（gzip），快照 {sp}")
+        if _RAW:
+            # 三跑共用同一 raw：增量/全量归档由 fetch-only 阶段负责，这里只写当日快照
+            os.makedirs(ARCHIVE_DIR, exist_ok=True)
+            day = datetime.date.today().strftime("%Y%m%d")
+            with open(os.path.join(ARCHIVE_DIR, f"sector-snapshot-{day}.json"), "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            print(f"      快照归档 data/sector-snapshot-{day}.json")
+        else:
+            # 本地直接跑（非 --raw）：增量/全量归档已在抓取阶段完成（fetch_incremental 返回前），再补快照
+            os.makedirs(ARCHIVE_DIR, exist_ok=True)
+            day = datetime.date.today().strftime("%Y%m%d")
+            with open(os.path.join(ARCHIVE_DIR, f"sector-snapshot-{day}.json"), "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            print(f"      快照归档 data/sector-snapshot-{day}.json")
 
 
 if __name__ == "__main__":

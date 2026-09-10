@@ -81,6 +81,8 @@ def fetch_em_kline(code, start=FETCH_START, end=None, retries=6):
     """东财日 K 线（klt=101 日线，fqt=1 前复权）。
     返回 klines 列表，每行 CSV：date,open,close,high,low,volume,amount,amplitude,pct,change,turnover。"""
     end = end or datetime.date.today().strftime("%Y%m%d")
+    if start > end:
+        return {"klines": []}   # 增量区间为空（基线已是最新）
     url = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?"
            f"secid={secid(code)}&fields1=f1,f2,f3,f4,f5,f6"
            "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
@@ -94,8 +96,8 @@ def fetch_em_kline(code, start=FETCH_START, end=None, retries=6):
             with urllib.request.urlopen(req, timeout=40) as r:
                 j = json.loads(r.read().decode("utf-8"))
             d = j.get("data") or {}
-            if d.get("klines"):
-                return d
+            if d.get("klines") or start != FETCH_START:
+                return d   # 增量区间无交易日（节假日/未刷新）也合法返回空
             last = ValueError("empty klines")
         except Exception as e:
             last = e
@@ -106,6 +108,8 @@ def fetch_em_kline(code, start=FETCH_START, end=None, retries=6):
 def fetch_csi_index(code, start="20150101", end=None, retries=4):
     """中证指数官网 index-perf（000300 沪深300 价格 / H00300 沪深300 全收益）。"""
     end = end or datetime.date.today().strftime("%Y%m%d")
+    if start > end:
+        return []   # 增量区间为空
     url = ("https://www.csindex.com.cn/csindex-home/perf/index-perf?"
            f"indexCode={code}&startDate={start}&endDate={end}")
     last = None
@@ -116,8 +120,8 @@ def fetch_csi_index(code, start="20150101", end=None, retries=4):
             with urllib.request.urlopen(req, timeout=40) as r:
                 j = json.loads(r.read().decode("utf-8"))
             rows = j.get("data") or []
-            if rows:
-                return rows
+            if rows or start != "20150101":
+                return rows   # 增量区间无交易日也合法返回空
             last = ValueError("empty rows")
         except Exception as e:
             last = e
