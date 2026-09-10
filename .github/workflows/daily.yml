@@ -68,25 +68,64 @@ jobs:
 
       - name: Publish to HSK file hosting (overwrite)
         # v7.12：发布确认——校验 hsk-cli 输出；claimed:false/pending 属正常待确认，重试一次后仍异常则红
+        # v7.16：HSK 资源 403 11301002（update function is disabled）→ 按用户决策自动创建新资源，
+        #   资源 ID/URL 持久化到 data/hsk-resource.json 并提交（后续 run 优先复用；仍尝试 update 旧资源以自动恢复）
         run: |
-          npm install -g @aweray/hsk-cli
+          npm install -g @aweray/hsk-cli >/dev/null 2>&1
           export PATH="$PATH:$(npm prefix -g)/bin"
-          hsk-cli api-key set --scene file_hosting --key "${{ secrets.HSK_API_KEY }}"
-          out=$(hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json)
-          echo "$out"
-          echo "$out" | grep -qE '"ok"|true|accepted|success|claimed' || { echo "首次发布输出异常，重试一次…"; sleep 5; out2=$(hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json); echo "$out2"; }
+          hsk-cli api-key set --scene file_hosting --key "${{ secrets.HSK_API_KEY }}" >/dev/null 2>&1
+          # 复用已持久化的新资源（若存在）
+          RES_ID="${{ secrets.HSK_RESOURCE_ID }}"
+          if [ -f data/hsk-resource.json ]; then
+            RES_ID=$(python3 -c "import json; print(json.load(open('data/hsk-resource.json'))['resource_id'])")
+            echo "复用持久化资源: $RES_ID"
+          fi
+          out=$(hsk-cli +host index.html --resource-id "$RES_ID" --format json 2>&1); echo "$out"
+          if echo "$out" | grep -q '11301002\|update function is disabled'; then
+            echo "== 资源更新被禁用（403 11301002），创建新资源 =="
+            out=$(hsk-cli host index.html --api-key "${{ secrets.HSK_API_KEY }}" --format json 2>&1); echo "$out"
+          fi
+          # 解析并持久化资源 ID/URL（新资源或成功更新均可）
+          echo "$out" > /tmp/hsk-out.txt
+          python3 - <<'EOF'
+          import json, re
+          out = open("/tmp/hsk-out.txt", encoding="utf-8").read()
+          url = re.search(r'https?://[^\s"\'\\]+', out)
+          rid = re.search(r'resource[_-]?id["\']?\s*[:=]\s*["\']?(\d+)', out, re.I)
+          rec = {}
+          if url: rec["url"] = url.group(0).rstrip('",)}')
+          if rid: rec["resource_id"] = rid.group(1)
+          if not rec:
+              raise SystemExit(f"无法从 hsk-cli 输出解析资源 URL/ID: {out[:400]}")
+          if os.path.exists("data/hsk-resource.json"):
+              old = json.load(open("data/hsk-resource.json", encoding="utf-8"))
+              if old.get("url") == rec.get("url") and old.get("resource_id") == rec.get("resource_id"):
+                  print(f"资源未变化: {rec.get('url')}")
+                  raise SystemExit(0)
+          os.makedirs("data", exist_ok=True)
+          json.dump(rec, open("data/hsk-resource.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          print(f"持久化资源: {rec}")
+          EOF
+          git add data/hsk-resource.json
+          git -c user.name="github-actions" -c user.email="actions@github.com" commit -m "chore(hsk): persist file-hosting resource [skip ci]" -q && git push -q origin HEAD && echo "资源记录已提交" || echo "资源记录无变化/无需提交"
         env:
           HSK_API_KEY: ${{ secrets.HSK_API_KEY }}
 
       - name: Verify published page is the new build
         # 发布后验证：线上 PAYLOAD 的 generated_at（红利低波 backtest + 行业轮动 sector）
         # 必须与本次本地产物一致，否则标红（人工可查日志）
+        # v7.16：URL 从 data/hsk-resource.json 读取（新资源），无则回退 945q5w.gicp.fun
         run: |
           python3 - <<'EOF'
-          import json, re, urllib.request
+          import json, os, re, urllib.request
+          url = "https://945q5w.gicp.fun"
+          if os.path.exists("data/hsk-resource.json"):
+              rec = json.load(open("data/hsk-resource.json", encoding="utf-8"))
+              url = rec.get("url", url)
+          print(f"线上地址: {url}")
           local = json.loads(re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', open("index.html", encoding="utf-8").read(), re.S).group(1))
           try:
-              with urllib.request.urlopen("https://945q5w.gicp.fun", timeout=30) as r:
+              with urllib.request.urlopen(url, timeout=30) as r:
                   html = r.read().decode("utf-8", "ignore")
               m = re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', html, re.S)
               online = json.loads(m.group(1)) if m else {}
