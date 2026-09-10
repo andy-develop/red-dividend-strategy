@@ -1,0 +1,25 @@
+name: hsk-diag
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: HSK 资源诊断（update 403 排查）
+        run: |
+          npm install -g @aweray/hsk-cli >/dev/null 2>&1
+          export PATH="$PATH:$(npm prefix -g)/bin"
+          hsk-cli api-key set --scene file_hosting --key "${{ secrets.HSK_API_KEY }}" >/dev/null 2>&1
+          echo "== 1) 资源状态 =="
+          hsk-cli claim status --format json 2>&1 | head -8 || echo "(claim status 不可用)"
+          echo "== 2) 尝试 update（resource-id） =="
+          hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json 2>&1 | head -8
+          echo "== 3) 尝试重新认领 bind =="
+          hsk-cli file-hosting-bind --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --api-key "${{ secrets.HSK_API_KEY }}" --format json 2>&1 | head -8 || echo "(bind 失败/无需)"
+          echo "== 4) bind 后重试 update =="
+          hsk-cli +host index.html --resource-id "${{ secrets.HSK_RESOURCE_ID }}" --format json 2>&1 | head -8
+          echo "== 5) 创建新资源（候选 URL） =="
+          hsk-cli host index.html --api-key "${{ secrets.HSK_API_KEY }}" --format json 2>&1 | head -20
