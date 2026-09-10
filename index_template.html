@@ -421,12 +421,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     {key:"sel", label:"选ETF", children:[
       {key:"sel-asset", label:"资产配置策略"},
       {key:"sel-sector", label:"行业轮动策略"},
-      {key:"sel-value", label:"估值驱动策略"},
-      {key:"sel-cat", label:"ETF分类", children:[
-        {key:"cat-broad", label:"宽基ETF", risk:"中"},
-        {key:"cat-sector", label:"行业主题ETF", risk:"高"},
-        {key:"cat-cross", label:"跨境ETF", risk:"高"}
-      ]}
+      {key:"sel-value", label:"估值驱动策略"}
     ]},
     {key:"timing", label:"ETF择时", children:[
       {key:"timing-hongli", label:"红利低波", content:true},
@@ -435,14 +430,10 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
     ]}
   ];
   var PAGE = {
-    "sel":        {t:"选ETF · 总览", c:"ETF 策略总览 · 内容建设中。将覆盖：资产配置策略、行业轮动策略、估值驱动策略、ETF 分类（宽基 / 行业主题 / 跨境）。"},
+    "sel":        {t:"选ETF · 总览", c:"ETF 策略总览 · 内容建设中。将覆盖：资产配置策略、行业轮动策略、估值驱动策略。"},
     "sel-asset":  {t:"资产配置策略", c:"内容建设中。将在此展示基于宏观环境与资产比价的配置方案与择时信号。"},
     "sel-sector": {t:"行业轮动策略", sector:true},
     "sel-value":  {t:"估值驱动策略", c:"内容建设中。将在此展示估值分位（股息率 / PE）驱动的买卖信号。"},
-    "sel-cat":    {t:"ETF 分类", c:"ETF 分类 · 内容建设中。下设宽基 ETF（中风险）、行业主题 ETF（高风险）、跨境 ETF（高风险）。"},
-    "cat-broad":  {t:"宽基 ETF", c:"宽基 ETF（中风险）· 内容建设中。将覆盖沪深300、中证500、中证1000 等宽基指数。"},
-    "cat-sector": {t:"行业主题 ETF", c:"行业主题 ETF（高风险）· 内容建设中。将覆盖消费、医药、科技、新能源等行业主题。"},
-    "cat-cross":  {t:"跨境 ETF", c:"跨境 ETF（高风险）· 内容建设中。将覆盖纳指、标普、恒生等跨境指数。"},
     "timing":       {t:"ETF 择时 · 总览", c:"ETF 择时 · 总览建设中。将覆盖：红利低波（已上线）、沪深300、中证500。"},
     "timing-hongli":{t:"红利低波", content:true},
     "timing-hs300": {t:"沪深300 择时", c:"沪深300 择时 · 内容建设中。将复用红利低波的择时框架（趋势 + 情绪极值 + 估值门）。"},
