@@ -74,6 +74,15 @@ jobs:
           npm install -g @aweray/hsk-cli >/dev/null 2>&1
           export PATH="$PATH:$(npm prefix -g)/bin"
           hsk-cli api-key set --scene file_hosting --key "${{ secrets.HSK_API_KEY }}" >/dev/null 2>&1
+          # 无变化跳过发布：index.html 与已发布版本 sha256 一致时（数据无更新）不重复创建资源
+          if [ -f data/hsk-resource.json ]; then
+            LAST_SHA=$(python3 -c "import json; print(json.load(open('data/hsk-resource.json')).get('index_sha256',''))" 2>/dev/null) || true
+            CUR_SHA=$(python3 -c "import hashlib; print(hashlib.sha256(open('index.html','rb').read()).hexdigest())")
+            if [ -n "$LAST_SHA" ] && [ "$LAST_SHA" = "$CUR_SHA" ]; then
+              echo "index.html 与已发布版本一致（sha256 $CUR_SHA），跳过发布"
+              exit 0
+            fi
+          fi
           # 复用已持久化的新资源（若存在）
           RES_ID="${{ secrets.HSK_RESOURCE_ID }}"
           if [ -f data/hsk-resource.json ]; then
@@ -89,14 +98,15 @@ jobs:
           # 解析并持久化资源 ID/URL（新资源或成功更新均可）
           echo "$out" > /tmp/hsk-out.txt || true
           python3 - <<'EOF'
-          import json, re
+          import json, os, re, hashlib
           out = open("/tmp/hsk-out.txt", encoding="utf-8").read()
           url = re.search(r'https?://[^\s"\'\\]+', out)
           rid = re.search(r'resource[_-]?id["\']?\s*[:=]\s*["\']?(\d+)', out, re.I)
           rec = {}
           if url: rec["url"] = url.group(0).rstrip('",)}')
           if rid: rec["resource_id"] = rid.group(1)
-          if not rec:
+          rec["index_sha256"] = hashlib.sha256(open("index.html", "rb").read()).hexdigest()
+          if not rec.get("url") or not rec.get("resource_id"):
               raise SystemExit(f"无法从 hsk-cli 输出解析资源 URL/ID: {out[:400]}")
           if os.path.exists("data/hsk-resource.json"):
               old = json.load(open("data/hsk-resource.json", encoding="utf-8"))
