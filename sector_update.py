@@ -23,7 +23,7 @@ import sector_engine as E
 import payload_util
 
 _ARGS = sys.argv[1:]
-_OUT = "index.html"; _DATA_OUT = "sector_data.json"; _DRY = False; _RAW = None
+_OUT = "index.html"; _DATA_OUT = "sector_data.json"; _DRY = False; _RAW = None; _FETCH_ONLY = None
 while _ARGS:
     a = _ARGS.pop(0)
     if a == "--out" and _ARGS:
@@ -32,6 +32,8 @@ while _ARGS:
         _DATA_OUT = _ARGS.pop(0)
     elif a == "--raw" and _ARGS:
         _RAW = _ARGS.pop(0)   # 从归档原始数据重跑（跳过抓取），便于本地复现/验证
+    elif a == "--fetch-only" and _ARGS:
+        _FETCH_ONLY = _ARGS.pop(0)   # 只抓取+校验，写原始 JSON 到指定路径（CI 一次抓取三跑共用）
     elif a == "--dry-run":
         _DRY = True   # 不覆盖仓库产物、不归档、不携带线上段（幂等断言用）
 OUT = os.path.join(BASE, _OUT)
@@ -187,6 +189,21 @@ def archive(raw, payload):
 
 
 def main():
+    if _FETCH_ONLY:
+        # CI 用：只抓取+硬校验，原始 JSON 写盘，供 --raw 三跑共用（抓取量 3×→1×，规避限流放大）
+        print("[fetch-only] 抓取 21 行业 × 30 ETF + 沪深300（并发 {}）...".format(FETCH_WORKERS))
+        raw = fetch_all()
+        etfs_ok = len(raw["etfs"])
+        print(f"      ETF 成功 {etfs_ok}/{len(U.ALL_ETFS)}；失败 {len(raw['failures'])}；"
+              f"CSI 全收益/价格 {len(raw['csi'].get('H00300', []))}/{len(raw['csi'].get('000300', []))} 条")
+        ok_inds, ratio, issues = validate(raw)
+        print(f"      有效行业 {ok_inds}/{len(U.INDUSTRY_LIST)}（{ratio:.0%}）")
+        for w in issues:
+            print("  [警告]", w)
+        with open(_FETCH_ONLY, "w", encoding="utf-8") as f:
+            json.dump(raw, f, ensure_ascii=False)
+        print(f"      原始数据已写 {_FETCH_ONLY}")
+        return
     if _RAW:
         print(f"[1/4] 使用归档原始数据重跑（{_RAW}，跳过抓取）...")
         if _RAW.endswith(".gz"):
