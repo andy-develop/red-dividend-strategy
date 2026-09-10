@@ -418,3 +418,30 @@ python3 /runtime/skills/html/scripts/shot.py product/index.html
 8. 幂等断言坑：`generated_at=bj_now()` 使两次 dry-run 逐位不同 → dry-run 模式固定为 "dry-run"，并给 daily.yml 的 dry 命令补上 `--dry-run` 参数。
 
 **v1 限制（页面披露）**：拥挤度缺"份额变化率"第三维（东财无稳定历史份额接口，两维合成）；信号按行业篮子（成员等权）产生，实盘按 ETF 映射执行存在跟踪误差。
+
+## 26. 增量更新机制 v1.1 + 发布链路 HSK 403 阻塞（2026-09-10 下午）
+
+### 增量更新机制（用户要求：每次触发不要全量更新数据）
+- **基线 = 最近一次全量周归档 + 其后每日增量**，重建为完整 raw（确定性）：
+  - sector：`data/sector-week-<date>.json.gz`（全量，基线陈旧 >7 天或缺失时全量重抓轮换）+ `data/sector-incr-<date>.json.gz`（每日增量区间行）
+  - 红利低波：`data/H20269-week-<date>.json` / `H30269-week-<date>.json` + `H20269-incr-<date>.json` / `H30269-incr-<date>.json`（中证指数无前复权问题，拼接安全）
+  - 旧全量归档（sector-raw-*.json.gz / H20269-<date>.json）已 `git mv` 为周基线格式，`rebuild_*` 兼容迁移
+- **每次抓取只请求 beg=基线末日+1 的增量区间**（每 ETF 几十行而非全量几千行）：
+  - 前复权刻度检测：增量首日与基线末日收盘价跳变 ≥11% → 期间除权、历史刻度失效 → 该 ETF 全量兜底重抓
+  - 缺口检测：增量首日与基线末日间隔 >10 自然日 → 全量兜底
+  - 基线已是最新（start>今天）→ 零请求，直接沿用基线（当日 CI/本地先后触发时）
+  - `SECTOR_QUICK=1`（CI）：增量失败快速回退基线行（2 次重试 + 20s 超时，封锁时 ~1 分钟失败），发布不中断
+- **归档治理**：incr 保留 30、week 保留 2，滚动删除；git 树体积可控
+- 单测：`tests/test_incremental.py` 7 项（合并/去重/刻度/缺口/重建/清理），总计 41 项全过；本地增量路径验证（基线已最新→沿用→32/32、21/21 有效）、幂等断言通过
+- 相关 commit：c73ae0f（增量机制）、21fa6b5（QUICK 快速失败优化）
+- CI 实测：增量模式下更新+幂等+commit 步骤 **~1 分钟跑完**（此前全量 + 限流要 20-40 分钟）
+
+### 发布链路阻塞：HSK 资源 update 被禁用（需用户决策）
+- **现象**：hsk-cli 0.7.13 `+host index.html --resource-id 1788920564682150822` → `403 code 11301002 "update function is disabled, please create a new resource"`。稳定复现（run 34440994250、34443871388 均在发布步骤失败，更新/commit 步骤全绿）。
+- **背景**：今天 08:00 该资源更新成功 4 次（run 34422199931/34422510265/34422908865/34423464398）；中午起 update ticket 接口被禁用。非瞬时故障，疑似 HSK 侧资源策略/账号状态变化（无控制台访问权无法确认）。
+- **诊断已备好待触发**：`.github/workflows/hsk-diag.yml`（workflow_dispatch）——依次：claim status / update 重试 / file-hosting-bind 认领 / bind 后重试 / 创建新资源候选 URL。**注意：该 workflow 尚未 push（本地 github.com 网络中断中）。**
+- **可行选项**：
+  1. HSK 控制台开启资源更新 / 重新绑定（需用户操作，URL 不变 945q5w.gicp.fun）
+  2. 创建新资源（hsk-cli host 不带 --resource-id）→ 新 URL，需用户接受换地址或确认能否绑定旧域名
+  3. 若 hsk-diag 的 bind 步骤能恢复 update → 自动恢复，URL 不变
+- **线上现状**：945q5w.gicp.fun 仍是 08:00 发布的内容（红利低波 + 行业轮动 12:05 本地数据已 push 到仓库但未上线；页面数据日期 2026-09-10 08:58/12:05 的快照在 index.html 中但线上还是 08:00 版）。
