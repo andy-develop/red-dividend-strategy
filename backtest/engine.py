@@ -15,7 +15,7 @@
   python3 engine.py [--out-dir .] [--start 2016-09-08]   # 独立回测（读 ../backtest 本地 CSV）
   或作为模块被 update.py import（get_prices -> build_signals -> replay -> metrics）
 """
-import json, os, sys, math, datetime
+import json, os, sys, math, datetime, types
 import pandas as pd
 import numpy as np
 
@@ -46,6 +46,20 @@ FIN_RATE = 0.07           # 融资年化 7%（>100% 杠杆部分，按交易日�
 TRADING_DAYS = 252        # 年化基准
 RISK_FREE = 0.0           # 夏普无风险利率
 
+# ---- 参数化（v8.0 沪深300 变体）：默认 = 上方模块常量；变体仅覆盖个别参数 ----
+_PARAM_NAMES = ("HOLD_DAYS", "REBUY_DAYS", "J_LOW", "J_HIGH", "J_CROSS_FROM", "J_CROSS_TO",
+                "RSI_OS", "RSI_CROSS_FROM", "RSI_CROSS_TO", "X_UP", "Y_DOWN", "Y_ACC",
+                "DIV_2OF3", "DELAY_SELL", "VAL_GATE", "MA250_GATE", "WEEK_J0", "VAL_WIN",
+                "MAX_POS", "START", "SLIPPAGE_BPS", "FEE_RATE", "FEE_MIN", "FIN_RATE", "TRADING_DAYS")
+
+
+def make_params(**overrides):
+    """基于默认参数构造变体参数集（如沪深300：X_UP=15/Y_DOWN=20/HOLD_DAYS=120）。
+    未覆盖项与红利低波完全一致，保证四态仓位机同构。"""
+    p = {k: globals()[k] for k in _PARAM_NAMES}
+    p.update(overrides)
+    return types.SimpleNamespace(**p)
+
 
 # ============ 数据 ============
 def get_prices(tr_path, px_path, start=START, end=None):
@@ -68,9 +82,11 @@ def get_prices(tr_path, px_path, start=START, end=None):
     return df
 
 
-def build_signals(df, use_tr=False):
+def build_signals(df, use_tr=False, p=None):
     """信号指标全部在价格指数 px 上计算；close 保留全收益用于收益核算。
-    use_tr=True 时信号改用全收益序列（仅用于口径归因实验，主回测恒为 False）。"""
+    use_tr=True 时信号改用全收益序列（仅用于口径归因实验，主回测恒为 False）。
+    p=None 用默认参数（红利低波口径）；p=make_params(...) 用于变体（如沪深300）。"""
+    P = p or sys.modules[__name__]
     c = df["close"] if use_tr else df["px"]
     df["ma20"] = c.rolling(20).mean()
     df["std20"] = c.rolling(20).std(ddof=0)
@@ -117,7 +133,7 @@ def build_signals(df, use_tr=False):
         df["y10"] = df["date"].map(y10).ffill()
         df["spread"] = df["div_proxy"] - df["y10"]
         # v7.11 定稿：滚动分位窗口 VAL_WIN 年（2y/3y/5y/expanding 实测选 3y；5y 冷启动 min_periods>回测预热致早期信号全禁）
-        win = int(VAL_WIN * 252)
+        win = int(P.VAL_WIN * 252)
         df["spread_pct"] = df["spread"].rolling(win, min_periods=int(win * 0.8)).rank(pct=True)
         df["os_half"] = df["spread_pct"].between(0.5, 0.8)
     else:
@@ -128,25 +144,25 @@ def build_signals(df, use_tr=False):
         df["spread"] = df["spread_pct"] = np.nan
         df["os_half"] = False
     # 超卖 2-of-4（px；v7.10 可选跌幅加速确认：dn63≤-Y_DOWN 且 近10日跌幅≥近63日跌幅×0.6）
-    drop_cond = (df["dn63"] <= -Y_DOWN) & ((df["dn10"] <= df["dn63"] * 0.6) if Y_ACC else True)
-    os_raw = ((df["wj"] < J_LOW).astype(int) + (c <= df["lower"]).astype(int)
-              + drop_cond.astype(int) + (df["wrsi"] < RSI_OS).astype(int)) >= 2
+    drop_cond = (df["dn63"] <= -P.Y_DOWN) & ((df["dn10"] <= df["dn63"] * 0.6) if P.Y_ACC else True)
+    os_raw = ((df["wj"] < P.J_LOW).astype(int) + (c <= df["lower"]).astype(int)
+              + drop_cond.astype(int) + (df["wrsi"] < P.RSI_OS).astype(int)) >= 2
     # v7.11 信号级过滤：估值分位<50% / 价格≥250日线 / 周线J≥0 时，超卖信号失效
     df["ma250"] = c.rolling(250).mean()
-    if VAL_GATE:
+    if P.VAL_GATE:
         os_raw = os_raw & (df["spread_pct"] >= 0.5)
-    if MA250_GATE:
+    if P.MA250_GATE:
         os_raw = os_raw & (c < df["ma250"])
-    if WEEK_J0:
+    if P.WEEK_J0:
         os_raw = os_raw & (df["wj"] < 0)
     df["oversold"] = os_raw
     # A态超买三维极值（px）
-    df["overbought"] = (df["wj"] > J_HIGH) & (c >= df["upper"]) & (df["up63"] >= X_UP)
+    df["overbought"] = (df["wj"] > P.J_HIGH) & (c >= df["upper"]) & (df["up63"] >= P.X_UP)
     # 动能消失（px）
     df["hi10c"] = c.rolling(10).max().shift(1)
     df["hi10rsi"] = df["rsi"].rolling(10).max().shift(1)
     rsi_diverg = (c > df["hi10c"]) & (df["rsi"] < df["hi10rsi"])
-    if DIV_2OF3:
+    if P.DIV_2OF3:
         # 扩展顶背离：RSI + MACD柱 + 量价 三选二（v7.10 实验）
         ema12 = c.ewm(span=12, adjust=False).mean()
         ema26 = c.ewm(span=26, adjust=False).mean()
@@ -161,23 +177,25 @@ def build_signals(df, use_tr=False):
         df["diverg"] = (rsi_diverg.astype(int) + macd_diverg.astype(int) + vol_diverg.astype(int)) >= 2
     else:
         df["diverg"] = rsi_diverg
-    df["j_cross"] = (df["wj"].rolling(10).max() > J_CROSS_FROM) & (df["wj"] <= J_CROSS_TO)
-    df["rsi_cross"] = (df["wrsi"].rolling(10).max() > RSI_CROSS_FROM) & (df["wrsi"] <= RSI_CROSS_TO)
+    df["j_cross"] = (df["wj"].rolling(10).max() > P.J_CROSS_FROM) & (df["wj"] <= P.J_CROSS_TO)
+    df["rsi_cross"] = (df["wrsi"].rolling(10).max() > P.RSI_CROSS_FROM) & (df["wrsi"] <= P.RSI_CROSS_TO)
     df["momentum_lost"] = df["j_cross"] | df["rsi_cross"] | df["diverg"]
     return df
 
 
-def replay(df, t1=True, start=START, delay_sell=DELAY_SELL):
+def replay(df, t1=True, start=START, delay_sell=DELAY_SELL, p=None):
     """T+1 撮合状态机重放（从 start 起输出；start 之前仅作信号预热）。
     信号 T 日收盘确认（用 df 上一行信号），T+1 日收盘成交（滑点计入成交价）。
     t1=False 时信号当日收盘确认、当日收盘成交（仅用于口径归因实验，主回测恒为 True）。
     delay_sell: 动能消失触发后第 N 个交易日成交（1=T+1 默认；3=延迟到第 3 交易日收盘成交，v7.10 实验）。
+    p=None 用默认参数；p=make_params(...) 用于变体（如沪深300）。
     返回 (trades, legs_closed, positions)：
       trades: 每笔 {date, action, px(信号价), fill(成交价含滑点), fee, slippage,
                     pos_before, pos_after, reason, amount}
       legs_closed: 抄底档闭环（FIFO）{buy_date, buy_fill, sell_date, sell_fill, reason, ret}
       positions: 每日目标仓位 Series（长度 = df 中 >= start 的行数）
     """
+    P = p or sys.modules[__name__]
     trades = []
     legs = []          # [(成交索引, 成交日期, 成交价(含滑点))]
     legs_closed = []
@@ -209,11 +227,11 @@ def replay(df, t1=True, start=START, delay_sell=DELAY_SELL):
             elif obsig: act = ("sell", 0.0, "B", "超买极值共振·清仓离场")
         elif state == "B":
             if osig: act = ("buy", 1.25, "C", "离场中现超卖共振·回补并加仓至125%")
-            elif t0 is not None and d >= t0 + datetime.timedelta(days=REBUY_DAYS):
+            elif t0 is not None and d >= t0 + datetime.timedelta(days=P.REBUY_DAYS):
                 act = ("buy", 1.0, "A", "离场满90自然日·强制回补至100%")
         elif state in ("C", "D"):
             # v7.11 估值"半力"：分位 50-80% 时禁止第二档加仓至 150%
-            half = VAL_GATE and prev is not None and bool(prev["os_half"])
+            half = P.VAL_GATE and prev is not None and bool(prev["os_half"])
             if state == "C" and osig and pos < 1.5 and not half:
                 act = ("buy", 1.5, "D", "再次超卖共振·加仓至150%")
             lost_now = prev is not None and bool(prev["momentum_lost"])
@@ -222,16 +240,16 @@ def replay(df, t1=True, start=START, delay_sell=DELAY_SELL):
             if pend is not None and i - pend[0] >= delay_sell:
                 act = ("sell", 1.0, "A", "动能消失·了结临时仓回100%")
                 pend = None
-            if act is None and legs and d >= legs[0][1] + datetime.timedelta(days=HOLD_DAYS):
+            if act is None and legs and d >= legs[0][1] + datetime.timedelta(days=P.HOLD_DAYS):
                 np_ = pos - 0.25
-                act = ("sell", np_, "C" if np_ > 1.0 + 1e-9 else "A", "加仓满60自然日·卖出一档临时仓")
+                act = ("sell", np_, "C" if np_ > 1.0 + 1e-9 else "A", f"加仓满{int(P.HOLD_DAYS)}自然日·卖出一档临时仓")
         # 期初建仓：回测起点首日直接 0 -> 100（无信号，T+1 框架下首日即持仓）
         if k == 0 and len(trades) == 0:
             act = ("buy", 1.0, "A", "期初建底仓·满仓100%")
         if act:
             new_pos, new_state = act[1], act[2]
             px_ = float(r["px"])
-            fill = px_ * (1 + SLIPPAGE_BPS / 1e4) if act[0] == "buy" else px_ * (1 - SLIPPAGE_BPS / 1e4)
+            fill = px_ * (1 + P.SLIPPAGE_BPS / 1e4) if act[0] == "buy" else px_ * (1 - P.SLIPPAGE_BPS / 1e4)
             trades.append({"date": d.strftime("%Y-%m-%d"), "action": "买入" if act[0] == "buy" else "卖出",
                            "px": round(px_, 2), "fill": round(fill, 2), "reason": act[3],
                            "pos_before": int(round(pos * 100)), "pos_after": int(round(new_pos * 100))})
@@ -257,14 +275,16 @@ def replay(df, t1=True, start=START, delay_sell=DELAY_SELL):
     return (trades, legs_closed, positions, state, pos, legs, t0)
 
 
-def equity_curve(df, trades, positions, initial=100000.0, start=START):
+def equity_curve(df, trades, positions, initial=100000.0, start=START, p=None):
     """日频净值核算（全收益 close 计收益，T+1 撮合）。
     【v7.12 地基修正】持仓市值按全收益指数再投计价：q 为 TR 归一份额
     （买入 q += buy_amt/(px*tr)，每日市值 = q * px * tr），使策略端吃到分红再投，
     与买入持有（bh_nav 用 TR）口径一致。此前用 px 计价漏掉全部分红，策略收益系统性低估。
     成交价仍用 px（可交易价格）；滑点+费用+融资成本作为显式成本从净值扣除。
     df 须为 >= start 的回测段（positions 与之对齐）。
+    p=None 用默认参数；p=make_params(...) 用于变体（如沪深300）。
     返回 dict: dates/strategy_nav/bh_nav/strategy_dd/bh_dd/pos_pct/costs。"""
+    P = p or sys.modules[__name__]
     dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
     tr = df["close"].values          # 全收益指数（收益口径）
     n = len(df)
@@ -274,7 +294,7 @@ def equity_curve(df, trades, positions, initial=100000.0, start=START):
     costs_ts = np.zeros(n)
     pos_pct = np.zeros(n)
     t_by_date = {t["date"]: t for t in trades}
-    s = SLIPPAGE_BPS / 1e4
+    s = P.SLIPPAGE_BPS / 1e4
     for i in range(n):
         dstr = dates[i]
         tr_i = tr[i]
@@ -286,7 +306,7 @@ def equity_curve(df, trades, positions, initial=100000.0, start=START):
                 target_val = cur_val * (t["pos_after"] / 100.0)
                 buy_amt = max(0.0, target_val - hold_val)
                 if buy_amt > 0:
-                    fee = max(buy_amt * FEE_RATE, FEE_MIN)
+                    fee = max(buy_amt * P.FEE_RATE, P.FEE_MIN)
                     slip = buy_amt * s
                     q += buy_amt / tr_i
                     cash -= buy_amt
@@ -296,17 +316,17 @@ def equity_curve(df, trades, positions, initial=100000.0, start=START):
                 target_val = cur_val * (t["pos_after"] / 100.0)
                 sell_amt = max(0.0, hold_val - target_val)
                 if sell_amt > 0:
-                    fee = max(sell_amt * FEE_RATE, FEE_MIN)
+                    fee = max(sell_amt * P.FEE_RATE, P.FEE_MIN)
                     slip = sell_amt * s
                     q -= sell_amt / tr_i
                     cash += sell_amt
                     costs_ts[i] += fee + slip
         # 融资成本（持仓日计提）：杠杆部分按日计息
-        p = positions[i]
-        if p > 1.0 + 1e-9:
+        pct = positions[i]
+        if pct > 1.0 + 1e-9:
             val = cash + q * tr_i
-            costs_ts[i] += val * (p - 1.0) * FIN_RATE / TRADING_DAYS
-        pos_pct[i] = p * 100
+            costs_ts[i] += val * (pct - 1.0) * P.FIN_RATE / P.TRADING_DAYS
+        pos_pct[i] = pct * 100
         nav_ts[i] = cash + q * tr_i
     # 显式成本在净值中扣除（等价于每日从收益扣减）
     cum_cost = np.cumsum(costs_ts)
@@ -419,15 +439,16 @@ def overview_stats(trades, closed, df):
     }
 
 
-def run(tr_path, px_path, start=START, end=None, delay_sell=DELAY_SELL):
+def run(tr_path, px_path, start=START, end=None, delay_sell=DELAY_SELL, p=None):
     """完整回测入口：读数据(含 warm-up) -> 信号 -> 撮合 -> 净值 -> 指标。
-    df 保留 START 前数据作指标预热；回测与净值核算从 start 起。"""
+    df 保留 START 前数据作指标预热；回测与净值核算从 start 起。
+    p=None 用默认参数（红利低波）；p=make_params(...) 用于变体（如沪深300）。"""
     df_all = get_prices(tr_path, px_path, end=end)
-    df_all = build_signals(df_all)
+    df_all = build_signals(df_all, p=p)
     trades, closed, positions, state, pos, legs, t0 = replay(df_all, t1=True, start=start,
-                                                             delay_sell=delay_sell)
+                                                             delay_sell=delay_sell, p=p)
     df = df_all[df_all["date"] >= pd.Timestamp(start)].reset_index(drop=True)
-    ec = equity_curve(df, trades, positions, start=start)
+    ec = equity_curve(df, trades, positions, start=start, p=p)
     m = metrics(ec, trades)
     m["n_oversold"] = len(closed)
     return {"df": df, "df_all": df_all, "trades": trades, "closed": closed, "positions": positions,

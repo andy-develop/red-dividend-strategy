@@ -280,7 +280,8 @@ def bj_now():
     return (datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))).strftime("%Y-%m-%d %H:%M")
 
 
-def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None, cal=None):
+def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None, cal=None, p=None):
+    P = p or E   # p=None 用默认参数（红利低波）；变体（沪深300）传 make_params 结果
     """今日快照：信号指标(px)、当前状态、触发缺口、临时仓倒计时。"""
     r = df.iloc[-1]
     close = float(r["close"])          # 全收益收盘（收益口径）
@@ -294,33 +295,33 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None, cal
     # 会把今天纳入、挤掉最老一天 → 阈值 = max(hi63, px)）
     need_band_low = max(0.0, (px / lower - 1) * 100)
     hi63_next = max(float(r["hi63"]), px)
-    need_dn = max(0.0, (1 - hi63_next * (1 - E.Y_DOWN / 100) / px) * 100)
-    hits_os = int((wj < E.J_LOW) + (px <= lower) + (float(r["dn63"]) <= -E.Y_DOWN) + (wrsi < E.RSI_OS))
+    need_dn = max(0.0, (1 - hi63_next * (1 - P.Y_DOWN / 100) / px) * 100)
+    hits_os = int((wj < P.J_LOW) + (px <= lower) + (float(r["dn63"]) <= -P.Y_DOWN) + (wrsi < P.RSI_OS))
     os_gap = {
         "hits": hits_os, "need": max(0, 2 - hits_os),
         "band": {"gap": round(need_band_low, 2), "hit": bool(px <= lower)},
-        "dn63": {"gap": round(need_dn, 2), "hit": bool(float(r["dn63"]) <= -E.Y_DOWN)},
-        "wj": {"val": round(wj, 2), "hit": bool(wj < E.J_LOW)},
-        "wrsi": {"val": round(wrsi, 2), "hit": bool(wrsi < E.RSI_OS)},
+        "dn63": {"gap": round(need_dn, 2), "hit": bool(float(r["dn63"]) <= -P.Y_DOWN)},
+        "wj": {"val": round(wj, 2), "hit": bool(wj < P.J_LOW)},
+        "wrsi": {"val": round(wrsi, 2), "hit": bool(wrsi < P.RSI_OS)},
         "hi63_next": round(hi63_next, 2),
     }
     # A态超买缺口（三维极值，px）
     need_band_up = max(0.0, (upper / px - 1) * 100)
-    need_up = max(0.0, (float(r["lo63"]) * (1 + E.X_UP / 100) / px - 1) * 100)
+    need_up = max(0.0, (float(r["lo63"]) * (1 + P.X_UP / 100) / px - 1) * 100)
     ob_gap = max(need_band_up, need_up)
     # 动能消失缺口（临时仓卖点，px）
-    need_j_drop = max(0.0, wj - E.J_CROSS_TO)
-    need_rsi_drop = max(0.0, wrsi - E.RSI_CROSS_TO)
+    need_j_drop = max(0.0, wj - P.J_CROSS_TO)
+    need_rsi_drop = max(0.0, wrsi - P.RSI_CROSS_TO)
     legs_info = []
     for li, ld, lf in legs:
-        due_date = ld + datetime.timedelta(days=E.HOLD_DAYS)
+        due_date = ld + datetime.timedelta(days=P.HOLD_DAYS)
         remaining = max(0, (due_date - last_date).days)
         legs_info.append({"buy_date": ld.strftime("%Y-%m-%d"),
                           "due_date": due_date.strftime("%Y-%m-%d"),
                           "remaining_days": remaining, "pct": 25})
     exit_info = None
     if state == "B" and t0 is not None:
-        rebuy = t0 + datetime.timedelta(days=E.REBUY_DAYS)
+        rebuy = t0 + datetime.timedelta(days=P.REBUY_DAYS)
         exit_info = {"exit_date": t0.strftime("%Y-%m-%d"),
                      "rebuy_due": rebuy.strftime("%Y-%m-%d"),
                      "remaining_days": max(0, (rebuy - last_date).days)}
@@ -338,7 +339,7 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None, cal
         "os_gap": os_gap,
         "ob_gap": {"need_rise_pct": round(ob_gap, 2),
                    "band_gap": round(need_band_up, 2), "up63_gap": round(need_up, 2),
-                   "wj_val": round(wj, 2), "wj_ok": wj > E.J_HIGH},
+                   "wj_val": round(wj, 2), "wj_ok": wj > P.J_HIGH},
         "ml_gap": {"j_need_drop": round(need_j_drop, 2), "rsi_need_drop": round(need_rsi_drop, 2),
                    "j_cross_ok": bool(r["j_cross"]), "rsi_cross_ok": bool(r["rsi_cross"]),
                    "diverg_ok": bool(r["diverg"]),
@@ -355,12 +356,12 @@ def build_snapshot(df, state, pos, legs, t0, trades, os_stat, warnings=None, cal
         "warnings": warnings or [],
         "recent_trades": trades[-12:],
         "oversold_stat": os_stat,
-        "param": {"j_low": E.J_LOW, "j_high": E.J_HIGH, "j_cross_from": E.J_CROSS_FROM,
-                  "j_cross_to": E.J_CROSS_TO, "rsi_os": E.RSI_OS,
-                  "rsi_cross_from": E.RSI_CROSS_FROM, "rsi_cross_to": E.RSI_CROSS_TO,
-                  "x_up": E.X_UP, "y_down": E.Y_DOWN, "hold_days": E.HOLD_DAYS, "rebuy_days": E.REBUY_DAYS,
-                  "slippage_bps": E.SLIPPAGE_BPS, "fin_rate": E.FIN_RATE,
-                  "val_gate": E.VAL_GATE, "ma250_gate": E.MA250_GATE, "val_win": E.VAL_WIN},
+        "param": {"j_low": P.J_LOW, "j_high": P.J_HIGH, "j_cross_from": P.J_CROSS_FROM,
+                  "j_cross_to": P.J_CROSS_TO, "rsi_os": P.RSI_OS,
+                  "rsi_cross_from": P.RSI_CROSS_FROM, "rsi_cross_to": P.RSI_CROSS_TO,
+                  "x_up": P.X_UP, "y_down": P.Y_DOWN, "hold_days": P.HOLD_DAYS, "rebuy_days": P.REBUY_DAYS,
+                  "slippage_bps": P.SLIPPAGE_BPS, "fin_rate": P.FIN_RATE,
+                  "val_gate": P.VAL_GATE, "ma250_gate": P.MA250_GATE, "val_win": P.VAL_WIN},
     }
     return snap
 
@@ -390,13 +391,16 @@ def build_backtest_payload(df, trades, ec, metrics, os_stat, overview):
 
 def render(snap, bt, prev_html=None, tpl=None):
     """生成自包含 index.html：注入红利低波 payload，并把现有 index.html 里的
-    sector（行业轮动）数据段原样携带回来（两个更新脚本轮流重写同一文件，互不覆盖）。"""
+    sector（行业轮动）与 hs300（沪深300 择时）数据段原样携带回来
+    （三个更新脚本轮流重写同一文件，互不覆盖）。"""
     tpl = tpl or open(os.path.join(BASE, "index_template.html"), encoding="utf-8").read()
     payload = {"snapshot": snap, "backtest": bt}
     if prev_html:
         prev = payload_util.extract(prev_html)
         if prev and prev.get("sector") is not None:
             payload["sector"] = prev["sector"]
+        if prev and prev.get("hs300") is not None:
+            payload["hs300"] = prev["hs300"]
     return payload_util.inject(tpl, payload)
 
 

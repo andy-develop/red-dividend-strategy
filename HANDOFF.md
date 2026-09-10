@@ -482,3 +482,35 @@ create ticket 可用。用户已拍板"发布为新资源"。最终发布机制�
   已持久化 data/hsk-resource.json（data_date + content_sha）。CI run 34458104865 全绿：构建→commit→发布跳过→verify 通过。
 - **验证**：chrome-headless-shell --dump-dom 本地确认 DOM 中无 ETF分类/宽基ETF/行业主题ETF/跨境ETF；
   线上 73f9qb curl 确认无 sel-cat，行业轮动/红利低波视图保留。
+
+## §29 沪深300 择时视图（v8.0，2026-09-10）
+用户需求：以 v7.7 红利低波四态仓位机为同构框架，新增沪深300 择时视图（timing-hs300，路由 #/timing-hs300），
+3 参数按沪深300 高波动重标定，展示内容与方式仿照红利低波（快照卡片 + 净值/回撤图 + 抄底胜率 + 交易明细）。
+
+- **引擎参数化**（backtest/engine.py v8.0）：新增 `make_params(**overrides)` 构造参数集；build_signals /
+  replay / equity_curve / run 加 `p=None`（None=红利低波默认，行为逐位不变，41 项既有测试零回归）。
+  `_PARAM_NAMES` 覆盖全部信号/执行参数；`P = p or sys.modules[__name__]`。
+- **沪深300 参数**（hs300_update.py）：`E.make_params(X_UP=15.0, Y_DOWN=20.0, HOLD_DAYS=120)`，
+  其余原样（REBUY_DAYS=90 / J<1,J>95 / RSI<35 / 布林 2σ / 杠杆上限 150% / T+1 / 滑点 5bp / 融资 7% /
+  双门 VAL_GATE+MA250_GATE / VAL_WIN=3）。START=2016-09-08 与红利低波同窗口（可比）。
+- **数据源**：中证 csindex index-perf —— H00300（全收益）/ 000300（价格），2013-01-01 起可用（已实测）。
+  增量机制与红利低波同构：data/H00300|000300-week/incr 归档 + 基线陈旧 7 天全量 + 幂等 dry×2。
+- **页面**：index_template.html 新增 view-hs300（复制 hongli 结构，id 前缀 x-）+ renderHs300()/
+  initHs300Charts()（阈值 14→20 / 20→15 / 60→120，ETF 510300）；TREE 已有 timing-hs300 节点，
+  PAGE["timing-hs300"] 由占位改 {t:"沪深300 择时", hs300:true}；routeTo 加 hs300 分支。
+- **carry-forward 三端闭环**：update.py（带 hs300 段）↔ hs300_update.py（带 snapshot/backtest/sector 段）
+  ↔ sector_update.py（带 hs300 段），本地按 CI 顺序三跑验证三段共存（段顺序任意不丢）。
+- **CI（daily.yml）**：update → hs300_update（dry×2 幂等 + 正式）→ sector；git add 加 hs300_data.json；
+  发布跳过 data_date 变三端 `snapshot|sector|hs300`；verify 比对三端 data_date。
+- **回测结果**（2016-09-08 起，参数 15/20/120）：策略 +100.0% / 夏普 0.47 / 回撤 -36.8% / 38 笔；
+  买入持有 +71.0% / -41.6%；抄底 13 档 61.5% 胜率 平均 +2.7%；当前状态 C 125%。
+  估值门现状：沪深300 估值分位 33%（<50%），今日超卖信号被估值门拦截。
+- **测试**：tests/test_hs300.py 8 项（make_params 默认=常量 / 3 参数覆盖生效且其余原样 /
+  显式默认与 p=None 逐列一致 / X_UP=15 超买更多 / Y_DOWN=20 超卖更少 / HOLD_DAYS 透传 /
+  snapshot.param 反映传入参数 / hs300_update.P 定义正确）。全量 49 项。
+- **验证**：chrome-headless-shell 本地渲染 #/timing-hs300（状态 C·125%、+100.0%、抄底 13 档 61.5%、
+  交易表 38 笔、估值门 33% 拦截）+ #/timing-hongli（A 态满仓）与 #/sel-sector（波动率过滤 70%）无回归；
+  HTML 截图 /tmp/hs300-shots/hs300_top.png。
+- **坑**：仓库根存在旧 engine.py（无 make_params），测试 import 顺序必须 BACKTEST 后插优先；
+  到期卖出 reason 用 f-string 携带 HOLD_DAYS（勿硬编码 120 污染红利低波）；due 过滤用
+  "卖出一档临时仓" 避免误匹配 "离场满90自然日·强制回补"。

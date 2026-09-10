@@ -438,7 +438,7 @@ def main():
     prev = payload_util.extract(prev_html) if prev_html else None
     merged = {}
     if prev:
-        for k in ("snapshot", "backtest"):
+        for k in ("snapshot", "backtest", "hs300"):
             if prev.get(k) is not None:
                 merged[k] = prev[k]
     merged["sector"] = payload
