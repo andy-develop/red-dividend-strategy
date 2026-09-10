@@ -54,6 +54,7 @@ ARCHIVE_DIR = os.path.join(BASE, "data")
 
 FETCH_WORKERS = 3      # ETF 并发抓取（东财限流明显；全局限流器 + 指数退避见 sector_universe）
 FETCH_RETRIES = 6      # 单只 ETF 失败重试次数（含退避 2s×(k+1)）
+FETCH_RETRIES_QUICK = 2   # SECTOR_QUICK=1（CI）：封锁时快速失败（2 次重试 + 20s 超时），由基线回退兜底
 FULL_EVERY_DAYS = 7    # 基线陈旧超过该天数 → 全量重抓（周基线轮换）
 KEEP_INCR = 30         # 增量归档保留个数
 KEEP_WEEK = 2          # 全量周归档保留个数
@@ -150,6 +151,47 @@ def rebuild_base():
     return None, None, "none"
 
 
+def _fetch_retries():
+    return FETCH_RETRIES_QUICK if os.environ.get("SECTOR_QUICK") else FETCH_RETRIES
+
+
+def _grab_em(raw, codes, start, incr=None, base_raw=None):
+    """并发抓取一批 ETF（增量区间或全量），并入 raw；失败记录 failures。
+    incr 非空时同时记录增量行；base_raw 提供旧行做刻度/缺口检测与合并。"""
+    quick = os.environ.get("SECTOR_QUICK")
+    retries = _fetch_retries()
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
+        futs = {ex.submit(U.fetch_em_kline, code, start=start, retries=retries,
+                          timeout=20 if quick else 40): (ind, code, name)
+                for ind, code, name in codes}
+        for f in as_completed(futs):
+            ind, code, name = futs[f]
+            old = (base_raw or {}).get("etfs", {}).get(code, {}).get("klines", []) if base_raw else []
+            try:
+                new_rows = f.result()["klines"]
+                if incr is not None and base_raw is not None and old:
+                    if kline_scale_jump(old, new_rows) or kline_gap_days(old, new_rows) > 10:
+                        d2 = U.fetch_em_kline(code, start=U.FETCH_START, retries=retries,
+                                              timeout=20 if quick else 40)
+                        merged = d2["klines"]
+                        incr["etfs"][code] = d2["klines"]
+                        print(f"      {code} {name} 刻度/缺口检测触发，全量兜底（{len(merged)} 行）")
+                    else:
+                        merged = merge_klines(old, new_rows)
+                        incr["etfs"][code] = new_rows
+                else:
+                    merged = new_rows
+                raw["etfs"][code] = {"industry": ind, "name": name, "klines": merged}
+            except Exception as exc:
+                if quick and old:
+                    raw["etfs"][code] = {"industry": ind, "name": name, "klines": old}
+                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:120]})
+                    print(f"  [快速回退] {code} {name} 增量失败，沿用基线数据：{str(exc)[:90]}")
+                else:
+                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:160]})
+                    print(f"  [失败] {code} {name}（{ind}）：{str(exc)[:120]}")
+
+
 def fetch_all():
     """并发抓取全部 ETF + 沪深300（全收益/价格），返回原始响应 dict。
     东财限流窗口是全局的：首轮失败后冷却 8s 只重抓失败项（最多 2 轮），
@@ -157,17 +199,7 @@ def fetch_all():
     raw = {"fetched_at": bj_now(), "etfs": {}, "csi": {}, "failures": []}
 
     def grab(codes):
-        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
-            fut = {ex.submit(U.fetch_em_kline, code, retries=FETCH_RETRIES): (ind, code, name)
-                   for ind, code, name in codes}
-            for f in as_completed(fut):
-                ind, code, name = fut[f]
-                try:
-                    d = f.result()
-                    raw["etfs"][code] = {"industry": ind, "name": name, "klines": d["klines"]}
-                except Exception as exc:
-                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:160]})
-                    print(f"  [失败] {code} {name}（{ind}）：{str(exc)[:120]}")
+        _grab_em(raw, codes, U.FETCH_START)
 
     grab(U.ALL_ETFS)
     # CI 场景（SECTOR_QUICK=1）：runner IP 被东财连接级封锁时快速失败，由 workflow 回退到归档
@@ -207,58 +239,14 @@ def fetch_incremental():
         # 基线已是最新（如当日 CI 与本地先后触发）：无增量区间，沿用基线
         print(f"[增量] 基线 {base_day} 已是最新，无增量区间，沿用基线数据")
         return base_raw, "incr", incr
-
-    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
-        futs = {ex.submit(U.fetch_em_kline, code, start=start, retries=FETCH_RETRIES): (ind, code, name)
-                for ind, code, name in U.ALL_ETFS}
-        for f in as_completed(futs):
-            ind, code, name = futs[f]
-            old = base_raw["etfs"].get(code, {}).get("klines", [])
-            try:
-                new_rows = f.result()["klines"]
-                if kline_scale_jump(old, new_rows) or kline_gap_days(old, new_rows) > 10:
-                    # 前复权刻度失效（除权）或缺口的 ETF：全量兜底重抓
-                    d2 = U.fetch_em_kline(code, start=U.FETCH_START, retries=FETCH_RETRIES)
-                    merged = d2["klines"]
-                    incr["etfs"][code] = d2["klines"]
-                    print(f"      {code} {name} 刻度/缺口检测触发，全量兜底（{len(merged)} 行）")
-                else:
-                    merged = merge_klines(old, new_rows)
-                    incr["etfs"][code] = new_rows
-                raw["etfs"][code] = {"industry": ind, "name": name, "klines": merged}
-            except Exception as exc:
-                if quick and old:
-                    # CI 快速失败：沿用基线行，保证发布不中断（数据日期=基线日期）
-                    raw["etfs"][code] = {"industry": ind, "name": name, "klines": old}
-                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:120]})
-                    print(f"  [快速回退] {code} {name} 增量失败，沿用基线 {base_day} 数据：{str(exc)[:90]}")
-                else:
-                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:160]})
-                    print(f"  [失败] {code} {name}（{ind}）：{str(exc)[:120]}")
+    _grab_em(raw, U.ALL_ETFS, start, incr=incr, base_raw=base_raw)
     # 非 quick：失败项冷却一轮重试（保持鲁棒性）
     if not quick and raw["failures"]:
         pending = [(f["industry"], f["code"], f["name"]) for f in raw["failures"]]
         print(f"      冷却 8s 后重试 {len(pending)} 只失败 ETF...")
         time.sleep(8)
         raw["failures"] = []
-        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
-            futs = {ex.submit(U.fetch_em_kline, code, start=start, retries=FETCH_RETRIES): (ind, code, name)
-                    for ind, code, name in pending}
-            for f in as_completed(futs):
-                ind, code, name = futs[f]
-                old = base_raw["etfs"].get(code, {}).get("klines", [])
-                try:
-                    new_rows = f.result()["klines"]
-                    if kline_scale_jump(old, new_rows) or kline_gap_days(old, new_rows) > 10:
-                        merged = U.fetch_em_kline(code, start=U.FETCH_START, retries=FETCH_RETRIES)["klines"]
-                        incr["etfs"][code] = merged
-                    else:
-                        merged = merge_klines(old, new_rows)
-                        incr["etfs"][code] = new_rows
-                    raw["etfs"][code] = {"industry": ind, "name": name, "klines": merged}
-                except Exception as exc:
-                    raw["failures"].append({"code": code, "name": name, "industry": ind, "error": str(exc)[:160]})
-                    print(f"  [失败] {code} {name}（{ind}）：{str(exc)[:120]}")
+        _grab_em(raw, pending, start, incr=incr, base_raw=base_raw)
     # 沪深300（中证无前复权问题，纯合并；失败沿用基线）
     for c in ("H00300", "000300"):
         old = base_raw.get("csi", {}).get(c, [])

@@ -77,9 +77,10 @@ def _throttle():
         _last_req = time.time()
 
 
-def fetch_em_kline(code, start=FETCH_START, end=None, retries=6):
+def fetch_em_kline(code, start=FETCH_START, end=None, retries=6, timeout=40):
     """东财日 K 线（klt=101 日线，fqt=1 前复权）。
-    返回 klines 列表，每行 CSV：date,open,close,high,low,volume,amount,amplitude,pct,change,turnover。"""
+    返回 klines 列表，每行 CSV：date,open,close,high,low,volume,amount,amplitude,pct,change,turnover。
+    timeout 由调用方控制：CI 快速失败模式（SECTOR_QUICK）用 20s 防挂起。"""
     end = end or datetime.date.today().strftime("%Y%m%d")
     if start > end:
         return {"klines": []}   # 增量区间为空（基线已是最新）
@@ -93,7 +94,7 @@ def fetch_em_kline(code, start=FETCH_START, end=None, retries=6):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA,
                                                        "Referer": "https://quote.eastmoney.com/"})
-            with urllib.request.urlopen(req, timeout=40) as r:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 j = json.loads(r.read().decode("utf-8"))
             d = j.get("data") or {}
             if d.get("klines") or start != FETCH_START:
