@@ -77,20 +77,20 @@ jobs:
           # 无变化跳过发布：本次构建的 generated_at（红利低波+行业轮动）与已发布版本一致时（数据无更新）
           # 不重复创建资源；sha256 因 CI 浮点尾差不可复现，改用语义信号 generated_at
           NEED_PUBLISH=$(python3 - <<'EOF'
-import json, os, re
-payload = json.loads(re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', open("index.html", encoding="utf-8").read(), re.S).group(1))
-ga = f"{payload.get('backtest', {}).get('generated_at')}|{payload.get('sector', {}).get('generated_at')}"
-print("本次构建 generated_at:", ga)
-skip = False
-if os.path.exists("data/hsk-resource.json"):
-    old = json.load(open("data/hsk-resource.json", encoding="utf-8"))
-    if old.get("generated_at") == ga:
-        print(f"数据未变化，跳过发布（复用 {old.get('url')}）")
-        skip = True
-print("YES" if skip else "NO")
-EOF
-)
-if [ "$(echo "$NEED_PUBLISH" | tail -1)" = "YES" ]; then exit 0; fi
+          import json, os, re
+          payload = json.loads(re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', open("index.html", encoding="utf-8").read(), re.S).group(1))
+          ga = f"{payload.get('backtest', {}).get('generated_at')}|{payload.get('sector', {}).get('generated_at')}"
+          print("本次构建 generated_at:", ga)
+          skip = False
+          if os.path.exists("data/hsk-resource.json"):
+              old = json.load(open("data/hsk-resource.json", encoding="utf-8"))
+              if old.get("generated_at") == ga:
+                  print(f"数据未变化，跳过发布（复用 {old.get('url')}）")
+                  skip = True
+          print("YES" if skip else "NO")
+          EOF
+          )
+          if [ "$(echo "$NEED_PUBLISH" | tail -1)" = "YES" ]; then exit 0; fi
           # 复用已持久化的新资源（若存在）
           RES_ID="${{ secrets.HSK_RESOURCE_ID }}"
           if [ -f data/hsk-resource.json ]; then
