@@ -1,7 +1,7 @@
 {
  "baseline": {
-  "total": 1.0211,
-  "sharpe": 0.558,
+  "total": 1.04,
+  "sharpe": 0.564,
   "mdd": -0.3565,
   "n_trades": 499
  },
@@ -9,128 +9,128 @@
   {
    "param": "TOP_N",
    "value": 3,
-   "total": 1.9267,
-   "sharpe": 0.725,
+   "total": 1.9501,
+   "sharpe": 0.73,
    "mdd": -0.3573,
    "n_trades": 362
   },
   {
    "param": "TOP_N",
    "value": 5,
-   "total": 0.8671,
-   "sharpe": 0.523,
+   "total": 0.8835,
+   "sharpe": 0.528,
    "mdd": -0.3967,
-   "n_trades": 667
+   "n_trades": 661
   },
   {
    "param": "SWAP_GAP",
    "value": 0.1,
-   "total": 1.0211,
-   "sharpe": 0.558,
+   "total": 1.04,
+   "sharpe": 0.564,
    "mdd": -0.3565,
    "n_trades": 499
   },
   {
    "param": "SWAP_GAP",
    "value": 0.2,
-   "total": 0.9864,
-   "sharpe": 0.548,
+   "total": 1.005,
+   "sharpe": 0.553,
    "mdd": -0.3565,
    "n_trades": 496
   },
   {
    "param": "STAY_PCT",
    "value": 0.5,
-   "total": 1.9925,
-   "sharpe": 0.774,
+   "total": 2.0181,
+   "sharpe": 0.779,
    "mdd": -0.3062,
-   "n_trades": 533
+   "n_trades": 528
   },
   {
    "param": "STAY_PCT",
    "value": 0.7,
-   "total": 0.6895,
-   "sharpe": 0.452,
+   "total": 0.7014,
+   "sharpe": 0.456,
    "mdd": -0.3585,
-   "n_trades": 501
+   "n_trades": 496
   },
   {
    "param": "CB_EXCESS_DD",
    "value": 0.05,
-   "total": 1.077,
-   "sharpe": 0.578,
+   "total": 1.0964,
+   "sharpe": 0.584,
    "mdd": -0.3612,
    "n_trades": 520
   },
   {
    "param": "CB_EXCESS_DD",
    "value": 0.12,
-   "total": 1.4406,
-   "sharpe": 0.626,
+   "total": 1.4634,
+   "sharpe": 0.631,
    "mdd": -0.3015,
    "n_trades": 405
   },
   {
    "param": "SL_STOP",
    "value": 0.08,
-   "total": 0.4399,
-   "sharpe": 0.361,
+   "total": 0.4534,
+   "sharpe": 0.367,
    "mdd": -0.4278,
    "n_trades": 467
   },
   {
    "param": "SL_STOP",
    "value": 0.16,
-   "total": 0.8778,
-   "sharpe": 0.497,
+   "total": 0.8954,
+   "sharpe": 0.503,
    "mdd": -0.4543,
    "n_trades": 514
   },
   {
    "param": "MK_CAP80",
    "value": 0.6,
-   "total": 1.0185,
-   "sharpe": 0.558,
+   "total": 1.0374,
+   "sharpe": 0.564,
    "mdd": -0.3565,
    "n_trades": 501
   },
   {
    "param": "MK_CAP80",
    "value": 0.8,
-   "total": 0.9834,
-   "sharpe": 0.547,
+   "total": 1.002,
+   "sharpe": 0.553,
    "mdd": -0.3565,
    "n_trades": 507
   },
   {
    "param": "MK_CAP90",
    "value": 0.4,
-   "total": 0.9543,
-   "sharpe": 0.542,
+   "total": 0.9689,
+   "sharpe": 0.547,
    "mdd": -0.3514,
    "n_trades": 517
   },
   {
    "param": "MK_CAP90",
    "value": 0.6,
-   "total": 0.7623,
-   "sharpe": 0.474,
+   "total": 0.7822,
+   "sharpe": 0.481,
    "mdd": -0.3473,
    "n_trades": 540
   },
   {
    "param": "SLIP_BPS",
    "value": 2,
-   "total": 1.067,
-   "sharpe": 0.558,
+   "total": 1.0864,
+   "sharpe": 0.564,
    "mdd": -0.3535,
    "n_trades": 499
   },
   {
    "param": "SLIP_BPS",
    "value": 10,
-   "total": 1.0066,
-   "sharpe": 0.577,
+   "total": 1.0254,
+   "sharpe": 0.583,
    "mdd": -0.349,
    "n_trades": 509
   }
@@ -157,9 +157,9 @@
   {
    "period": "2024-2026",
    "start": "2024-01-01",
-   "end": "2026-09-10",
-   "total": 0.439,
-   "sharpe": 0.835,
+   "end": "2026-09-09",
+   "total": 0.4524,
+   "sharpe": 0.854,
    "mdd": -0.1967,
    "n_trades": 106
   }
@@ -168,16 +168,16 @@
   "n": 150,
   "seed": 42,
   "sharpe": {
-   "mean": 0.371,
-   "p50": 0.366,
-   "p95": 0.639,
-   "max": 0.933
+   "mean": 0.389,
+   "p50": 0.381,
+   "p95": 0.714,
+   "max": 0.766
   },
-  "total_mean": 0.3966,
-  "real_sharpe": 0.558,
-  "percentile": 0.88,
-  "p_value": 0.12
+  "total_mean": 0.4403,
+  "real_sharpe": 0.564,
+  "percentile": 0.853,
+  "p_value": 0.147
  },
  "note": "固定 seed 42；随机对照仅替换得分（同日程/门槛/留仓/换手/风控）；PBO / Deflated Sharpe 未实现（见交付说明披露）",
- "cleaned_bars": 2
+ "cleaned_bars": 32
 }
