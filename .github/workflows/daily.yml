@@ -50,13 +50,23 @@ jobs:
           SECTOR_QUICK=1 python3 sector_update.py --fetch-only /tmp/sector-raw.json || true
           if [ ! -s /tmp/sector-raw.json ]; then
             echo "行业轮动抓取失败（东财限流/封锁），重建最近基线（周归档+增量）..."
-            python3 -c "import json, sys; sys.path.insert(0, '.'); import sector_update as S; raw, day, mode = S.rebuild_base(); json.dump(raw, open('/tmp/sector-raw.json','w',encoding='utf-8'), ensure_ascii=False); print('基线', day, 'mode=', mode)" || python3 -c "import json, sys; sys.path.insert(0, '.'); import sector_update as S; raw, day, mode = S.rebuild_base(); print('FAIL', day, mode)"
+            python3 -c "import json, sys; sys.path.insert(0, '.'); import sector_update as S; raw, day, mode = S.rebuild_base(); assert raw is not None, 'rebuild_base 无任何归档'; json.dump(raw, open('/tmp/sector-raw.json','w',encoding='utf-8'), ensure_ascii=False); print('基线', day, 'mode=', mode)" || python3 -c "import sys; sys.path.insert(0, '.'); import sector_update as S; raw, day, mode = S.rebuild_base(); print('FAIL', day, mode); sys.exit(2)"
             test -s /tmp/sector-raw.json
           fi
           python3 sector_update.py --raw /tmp/sector-raw.json --dry-run --out /tmp/dry-sector-index.html --data-out /tmp/dry-sector-data.json
           python3 sector_update.py --raw /tmp/sector-raw.json --dry-run --out /tmp/dry-sector-index2.html --data-out /tmp/dry-sector-data2.json
           cmp /tmp/dry-sector-data.json /tmp/dry-sector-data2.json && echo "行业轮动幂等断言通过：同一输入两次生成逐位一致"
           python3 sector_update.py --raw /tmp/sector-raw.json
+          # v1.1（P0-4）过拟合体检：参数扰动 + walk-forward + 随机对照（固定 seed 42，确定性）
+          python3 sector_sensitivity.py --raw /tmp/sector-raw.json && echo "过拟合体检完成（data/sector-sensitivity.json）"
+
+      - name: Manual trigger guard (P0-1, intraday half-bar)
+        # v1.1：workflow_dispatch 手动触发在盘中运行会抓到半截 bar——sector_update 的 clean_intraday
+        # 已按交易日历剔除未收盘/半截 bar（末日=最近已收盘交易日，data_date 恒为昨日或更早），
+        # 此处仅提示，不阻断（clean 是真正的防线）。
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "::warning::手动触发提示：A股收盘后（北京 15:30 后）运行可获得当日收盘数据；盘中运行将自动清洗半截 bar 并以前一交易日发布。"
 
       - name: Commit input archive + artifacts (reproducible history)
         # v7.12：输入原始响应/快照/产物全部入库，出争议可还原"某天页面说了什么、依据了什么数据"
@@ -151,12 +161,13 @@ jobs:
         #   比对信号用 data_date（generated_at 每次构建都变，不适用）
         run: |
           python3 - <<'EOF'
-          import json, os, re, urllib.request
+          import json, os, re, hashlib, urllib.request
           url = "https://945q5w.gicp.fun"
           if os.path.exists("data/hsk-resource.json"):
               rec = json.load(open("data/hsk-resource.json", encoding="utf-8"))
               url = rec.get("url", url)
           print(f"线上地址: {url}")
+          norm = lambda b: re.sub(rb'"generated_at"\s*:\s*"[^"]*"', b'"generated_at":""', b)
           local = json.loads(re.search(r'<script id="PAYLOAD" type="application/json">(.*?)</script>', open("index.html", encoding="utf-8").read(), re.S).group(1))
           try:
               with urllib.request.urlopen(url, timeout=30) as r:
@@ -174,7 +185,14 @@ jobs:
               print(f"线上 沪深300 data_date: {oh}")
               if lv != ov or ls != os_ or lh != oh:
                   raise SystemExit(f"发布验证失败：线上数据未更新（红利低波 {ov}!={lv} / 行业轮动 {os_}!={ls} / 沪深300 {oh}!={lh}）")
-              print("发布验证通过：线上已是本次数据（红利低波 + 行业轮动 + 沪深300）")
+              # v1.1（P1-15）：verify 补内容哈希——data_date 相同但页面结构/数字被篡改也能检出
+              lsha = hashlib.sha256(norm(open("index.html", "rb").read())).hexdigest()
+              osha = hashlib.sha256(norm(html.encode("utf-8"))).hexdigest() if m else ""
+              print(f"本地 content_sha: {lsha[:12]}")
+              print(f"线上 content_sha: {osha[:12]}")
+              if lsha != osha:
+                  raise SystemExit(f"发布验证失败：内容哈希不一致（{osha[:12]}!={lsha[:12]}）")
+              print("发布验证通过：线上已是本次数据（红利低波 + 行业轮动 + 沪深300），内容哈希一致")
           except Exception as e:
               raise SystemExit(f"发布验证失败：{e}")
           EOF

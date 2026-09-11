@@ -340,7 +340,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <span>数据日期 <b id="s-date">—</b></span>
       <span>生成时间 <b id="s-gen">—</b></span>
       <span>覆盖 <b id="s-cov">—</b></span>
-      <span>策略版本 <b>v1.0</b></span>
+      <span>策略版本 <b>v1.1</b></span>
       <span>实现依据 <b>《ETF行业轮动量化策略方案》</b></span>
     </div>
   </header>
@@ -367,7 +367,7 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
 
   <!-- ④ 回测证据 -->
   <section>
-    <div class="sec-t"><span class="sec-n">④</span>回测证据 · 2018 至今（初始 10 万 · 双边成本 12bp）</div>
+    <div class="sec-t"><span class="sec-n">④</span>回测证据 · 2018 至今（初始 10 万 · 滑点 5bp + 佣金 max(万1,5元)）</div>
     <div class="bt-kpis" id="s-kpis"></div>
     <div class="bt-note">净值曲线（抽样展示，指标按日频全量计算）：</div>
     <div class="chart" id="s-nav-chart"></div>
@@ -381,6 +381,13 @@ footer{font-size:12px;color:var(--dim);margin-top:24px;padding-top:12px;border-t
       <summary><span class="sum-t">历史调仓明细</span><span class="sum-n">全期 <b id="s-tr-count">—</b> 笔（页面展示最近 150 笔）</span></summary>
       <div class="detail-body">
         <div class="tbl-wrap"><table id="s-trade-tbl"></table></div>
+      </div>
+    </details>
+
+    <details>
+      <summary><span class="sum-t">过拟合体检（P0-4）</span><span class="sum-n">参数敏感性 · Walk-Forward · 随机选股对照</span></summary>
+      <div class="detail-body">
+        <div class="sens" id="s-sens"></div>
       </div>
     </details>
 
@@ -1224,6 +1231,10 @@ function renderSector(){
   if (R.cb) { badge.textContent = "超额收益熔断中 · 仓位上限 " + Math.round(capNow*100) + "%"; badge.className = "badge b-danger"; }
   else if (capNow < 0.99) { badge.textContent = "波动率过滤 · 仓位上限 " + Math.round(capNow*100) + "%"; badge.className = "badge b-warn"; }
   else { badge.textContent = "常态运行 · 满仓"; badge.className = "badge b-ok"; }
+  // v1.1（P2-1）：末日挂单悬空显式提示（决策日=T+1 执行，末日无 T+1 可执行）
+  if (R.pending_rebalance != null && R.pending_rebalance > 0) {
+    badge.textContent += " · 挂单待 T+1 执行（目标暴露 " + Math.round(R.pending_rebalance*100) + "%）";
+  }
 
   // ① 当前持仓
   var H = SEC.holdings || [], hmap = {};
@@ -1232,7 +1243,7 @@ function renderSector(){
     ? H.map(function(h){ return '<div class="pos-cell"><div class="lab">#' + h.rank + " · " + esc(h.ind) + '</div><div class="val" style="color:var(--blue)">' + fmt(h.w,1) + "%</div><div class=\"lab\">权重（等权 " + fmt(100/(H.length||1),0) + "% 口径）</div></div>"; }).join("")
     : '<div class="pos-cell"><div class="lab">当前持仓</div><div class="val">空仓</div><div class="lab">风控降仓或熔断中</div></div>';
   document.getElementById("s-hold-tip").innerHTML = "调仓规则：月度最后一个交易日决策、T+1 收盘执行，持有 Top-" + (SEC.params?SEC.params.top_n:4) + " 等权；"
-    + "新入选行业得分须 ≥ 当前持仓最低分 ×" + (SEC.params?SEC.params.swap_gap:0.15)*100 + "%；持仓排名前 60% 留仓观察；"
+    + "新入选行业得分须 ≥ 当前持仓最低分 +" + (SEC.params?SEC.params.swap_gap:0.15) + "（z 分加法，v1.1 修复负分方向反转）；持仓排名前 60% 留仓观察；"
     + "月中加速每月最多一次；单行业自建仓成本回撤 >" + (SEC.params?SEC.params.sl_stop:0.12)*100 + "% 无条件止损。"
 
   // ② 行业动量排行
@@ -1252,9 +1263,10 @@ function renderSector(){
 
   // ③ 风控状态
   document.getElementById("s-risk").innerHTML = [
-    ["超额收益熔断（20日 vs 沪深300全收益）", R.cb ? "<b style='color:#C0392B'>已触发 · 仓位降至 50% · 暂停开仓</b>" : ("正常 · 近20日超额 " + (R.exc20==null?"—":pct1(R.exc20*100)))],
+    ["超额收益熔断（20日 vs 沪深300全收益，近252日窗口高点回撤≥8pp）", R.cb ? "<b style='color:#C0392B'>已触发 · 仓位降至 50% · 暂停开仓</b>" : ("正常 · 近20日超额 " + (R.exc20==null?"—":pct1(R.exc20*100)))],
     ["市场波动率过滤（沪深300 60日波动率 1年分位）", "当前分位 " + fmt((R.mk_pct==null?0:R.mk_pct)*100,0) + "% · 总仓位上限 " + Math.round((R.mk_cap==null?1:R.mk_cap)*100) + "%"],
     ["当前实际仓位 / 目标上限（熔断与波动率取孰低）", Math.round((R.scale==null?1:R.scale)*100) + "% / " + Math.round(Math.min(R.cb?0.5:1, R.mk_cap==null?1:R.mk_cap)*100) + "%（调仓 T+1 执行）"],
+    ["挂单待执行（v1.1，决策日=T+1 成交）", R.pending_rebalance==null?"无挂单":"目标暴露 " + Math.round(R.pending_rebalance*100) + "%（T+1 收盘成交后生效）"],
     ["单行业止损线", "自建仓成本回撤 >" + (SEC.params?SEC.params.sl_stop:0.12)*100 + "% 无条件平仓"]
   ].map(function(c){ return '<div class="pos-cell"><div class="lab">' + c[0] + '</div><div class="val" style="font-size:15px;line-height:1.5">' + c[1] + '</div></div>'; }).join("");
 
@@ -1269,8 +1281,10 @@ function renderSector(){
     ["月度胜率", M.month_win==null?"—":fmt(M.month_win*100,0)+"%"],
     ["交易笔数 / 年均换手", (M.n_trades==null?"—":M.n_trades) + " / " + (M.avg_annual_turn==null?"—":fmt(M.avg_annual_turn,2))],
     ["累计成本（10 万口径）", fmt(SEC.cost_yuan||0,0) + " 元"],
-    ["基准：沪深300 全收益", kv(M.csi_total*100, true)],
-    ["基准：行业等权", kv(M.ew_total*100, true)]
+    ["平均暴露（v1.1）", M.avg_exposure==null?"—":fmt(M.avg_exposure*100,0)+"%"],
+    ["基准：沪深300 全收益（夏普/IR）", kv(M.csi_total*100, true) + " / " + (M.csi_sharpe==null?"—":fmt(M.csi_sharpe,2)) + " / " + (M.csi_ir==null?"—":fmt(M.csi_ir,2))],
+    ["基准：行业等权（夏普/IR）", kv(M.ew_total*100, true) + " / " + (M.ew_sharpe==null?"—":fmt(M.ew_sharpe,2)) + " / " + (M.ew_ir==null?"—":fmt(M.ew_ir,2))],
+    ["同暴露折算：沪深300 / 等权（v1.1）", kv(M.csi_adj_total==null?null:M.csi_adj_total*100, true) + " / " + kv(M.ew_adj_total==null?null:M.ew_adj_total*100, true)]
   ].map(function(c){ return '<div class="bt-cell"><div class="lab">' + c[0] + '</div><div class="val">' + c[1] + '</div></div>'; }).join("");
 
   // 分年收益
@@ -1295,8 +1309,43 @@ function renderSector(){
   }).join("");
   var rl = document.getElementById("s-rule");
   rl.innerHTML = (SEC.disclosure || []).map(function(d){ return "<li>" + esc(d) + "</li>"; }).join("");
+  // v1.1：数据质量披露（换手率越界 / 成交额零值 / 流动性不达标 / 缺失 ETF / 半截 bar 清理）
+  if (SEC.issues && SEC.issues.length) {
+    rl.innerHTML += "<li><b style='color:#B45309'>数据质量：" + SEC.issues.map(esc).join("；") + "</b></li>";
+  }
   if (SEC.fetch_failures && SEC.fetch_failures.length) {
     rl.innerHTML += "<li><b style='color:#C0392B'>当日抓取失败：" + SEC.fetch_failures.map(function(f){ return f.code + " " + f.name + "（" + f.industry + "）"; }).join("、") + "</b>——对应行业已按可用成员降级或动态剔除，覆盖数以页面为准。</li>";
+  }
+
+  // ⑤ 过拟合体检（P0-4）：参数敏感性 / Walk-Forward / 随机选股对照
+  var SE = SEC.sensitivity, sensEl = document.getElementById("s-sens");
+  if (SE && sensEl) {
+    var h = [];
+    var rc = SE.random_control;
+    if (rc) {
+      var pv = rc.p_value;
+      var verdict = pv==null?"—":(pv<0.05?"<b style='color:#C0392B'>p<0.05 统计显著</b>":(pv<0.10?"边缘显著":"<b style='color:#C0392B'>不显著（过拟合风险，与审计结论一致）</b>"));
+      h.push('<div class="bt-note" style="margin-top:6px">随机选股对照（' + rc.n + ' 次 · seed ' + rc.seed + '）：真实夏普 ' + fmt(rc.real_sharpe,3)
+        + ' · 随机分布 mean ' + fmt(rc.sharpe.mean,3) + ' / p95 ' + fmt(rc.sharpe.p95,3) + ' / max ' + fmt(rc.sharpe.max,3)
+        + '；真实值位于随机分布 ' + fmt(rc.percentile*100,1) + ' 分位，p=' + (pv==null?"—":pv.toFixed(3)) + ' → ' + verdict + '</div>');
+    }
+    var wf = SE.walk_forward;
+    if (wf && wf.length) {
+      h.push('<div class="bt-note" style="margin-top:8px">Walk-Forward 三段（固定参数，不在测试段上调参）：</div>'
+        + '<div class="tbl-wrap"><table class="grid"><thead><tr><th>区间</th><th>夏普</th><th>总收益</th><th>最大回撤</th><th>交易</th></tr></thead><tbody>'
+        + wf.map(function(w){ return "<tr><td>" + esc(w.period) + "</td><td>" + fmt(w.sharpe,2) + "</td><td>" + (w.total>0?"+":"") + fmt(w.total*100,1) + "%</td><td>" + fmt(w.mdd*100,1) + "%</td><td>" + w.n_trades + "</td></tr>"; }).join("")
+        + "</tbody></table></div>");
+    }
+    var sp = SE.sensitivity;
+    if (sp && sp.length) {
+      h.push('<div class="bt-note" style="margin-top:8px">参数敏感性（基线 夏普 ' + fmt(SE.baseline.sharpe,2) + ' / 收益 ' + fmt(SE.baseline.total*100,1) + '% / 回撤 ' + fmt(SE.baseline.mdd*100,1) + '%）：</div>'
+        + '<div class="tbl-wrap"><table class="grid"><thead><tr><th>参数</th><th>档位</th><th>夏普</th><th>总收益</th><th>回撤</th><th>交易</th></tr></thead><tbody>'
+        + sp.map(function(p){ return "<tr><td>" + esc(p.param) + "</td><td>" + p.value + "</td><td>" + fmt(p.sharpe,2) + "</td><td>" + (p.total>0?"+":"") + fmt(p.total*100,1) + "%</td><td>" + fmt(p.mdd*100,1) + "%</td><td>" + p.n_trades + "</td></tr>"; }).join("")
+        + "</tbody></table></div>");
+    }
+    h.push('<div class="bt-note" style="color:var(--dim);font-size:12px;margin-top:8px">'
+      + (SE.note?esc(SE.note):"") + '；体检由 sector_sensitivity.py 生成（seed 42 确定性），页面仅如实披露、不做参数回填。</div>');
+    sensEl.innerHTML = h.join("");
   }
 }
 function initSectorCharts(){

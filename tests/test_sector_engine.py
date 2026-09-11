@@ -141,6 +141,26 @@ class TestSelect(unittest.TestCase):
         self.assertNotIn(5, sel)
         self.assertEqual(sorted(sel), [0, 1, 2, 3])
 
+    def test_swap_threshold_negative_scores(self):
+        # P1-8 回归：持仓最低分为负时，旧乘法门槛 min_held×(1+15%) 比最低分更低，
+        # "候选更差也能换入"方向反转；加法门槛 min_held+SWAP_GAP 恒为更严格方向。
+        score, pooled, cur = self._mk([0.5, -0.6, -0.44, -1.0, -1.2, -1.5], [1])   # 持仓 1 得 -0.6
+        sel = E.select_target(0, cur, score, pooled)
+        # 候选 0 得 0.5 必入；候选 2 得 -0.44 ≥ -0.6+0.15=-0.45 达标可入
+        self.assertIn(0, sel)
+        self.assertIn(2, sel)
+        # 比持仓更差的候选（-1.0 / -1.2 / -1.5 < -0.45）不得进入（旧乘法下 -1.0 ≥ -0.69 会误入）
+        for i in (3, 4, 5):
+            self.assertNotIn(i, sel)
+
+    def test_swap_threshold_additive_blocks_weak_entrant(self):
+        # 加法门槛：候选得分须 ≥ 持仓最低分 + SWAP_GAP 才换入
+        score, pooled, cur = self._mk([1.0, 1.1, 1.3, 0.5, 0.4, 0.3], [0])   # 持仓 0 得 1.0
+        sel = E.select_target(0, cur, score, pooled)
+        self.assertIn(0, sel)
+        self.assertNotIn(1, sel)   # 1.1 < 1.0+0.15=1.15，不换
+        self.assertIn(2, sel)      # 1.3 ≥ 1.15，换入
+
     def test_turnover_cap_zero_budget_keeps_positions(self):
         # 换手预算耗尽时调仓不得清仓：持仓原样保留（防止"加速用光预算→月末全卖"事故）
         weights = np.array([0.25, 0.25, 0.25, 0.25, 0.0, 0.0])
@@ -219,6 +239,47 @@ class TestBacktest(unittest.TestCase):
         sl = [t for t in bt["trades"] if t["industry"] == "A" and t["reason"] == "止损"]
         self.assertTrue(len(sl) > 0, "A 崩盘后应触发单行业止损")
 
+    def test_stop_loss_no_double_count(self):
+        # P1-7 回归：止损平仓只计一次——修复前调仓日 gross=Σ|Δ| 已含止损退出量、
+        # 循环再累加一次（双重计费多扣成本+挤占换手预算）。
+        # 断言：每个止损日之后一交易日，止损行业权重确实归零（卖出只执行一次、无幽灵重复卖出）。
+        dates = pd.bdate_range("2015-01-02", "2022-12-30")
+        n = len(dates)
+        raw = {"etfs": {}, "csi": {}}
+        drifts = {"A": 0.002, "B": 0.0004, "C": 0.0003, "D": 0.0003, "E": 0.0002, "F": 0.0001}
+        for j, (k, dr) in enumerate(drifts.items()):
+            ret = np.full(n, dr)
+            if k == "A":
+                crash = (dates >= pd.Timestamp("2018-05-07")) & (dates < pd.Timestamp("2018-05-21"))
+                ret[crash] = -0.04
+            close = 100 * np.cumprod(1 + ret)
+            kl = []
+            prev = close[0]
+            for i, d in enumerate(dates):
+                c = close[i]
+                kl.append(f"{d.strftime('%Y-%m-%d')},{prev:.4f},{c:.4f},{max(prev,c)*1.002:.4f},"
+                          f"{min(prev,c)*0.998:.4f},1000,5e8,1.0,0.0,0.0,1.5")
+                prev = c
+            raw["etfs"][f"11{j:04d}"] = {"industry": k, "name": f"ETF{k}", "klines": kl}
+        csi_close = 3000 * np.cumprod(1 + np.full(n, 0.0003))
+        raw["csi"] = {"H00300": [{"tradeDate": d.strftime("%Y%m%d"), "close": float(c)}
+                                 for d, c in zip(dates, csi_close)],
+                      "000300": [{"tradeDate": d.strftime("%Y%m%d"), "close": float(c / 1.5)}
+                                 for d, c in zip(dates, csi_close)]}
+        panel = E.build_panel(raw)
+        fac = E.compute_factors(panel)
+        bt = E.backtest(panel, fac)
+        a_idx = panel["inds"].index("A")
+        sl_days = sorted({t["date"] for t in bt["trades"] if t["reason"] == "止损"})
+        self.assertTrue(len(sl_days) > 0)
+        hh = bt["holdings_history"]
+        by_date = [h["weights"] for h in hh]
+        dlist = [h["date"] for h in hh]
+        for d in sl_days:
+            i = dlist.index(d)
+            self.assertLessEqual(i + 1, len(by_date) - 1)
+            self.assertEqual(by_date[i + 1][a_idx], 0.0, f"{d} 止损后 A 应清仓（只卖一次）")
+
     def test_circuit_breaker_scales_down(self):
         # 先赢后输：前期行业普涨、后期行业普跌而沪深300 rally → 超额回撤触发熔断
         inds = {k: [(f"11{i}", 0.0006, 0.012, 1.5)] for i, k in enumerate(["A", "B", "C", "D", "E", "F"])}
@@ -244,6 +305,32 @@ class TestBacktest(unittest.TestCase):
         cbs = [h for h in bt["holdings_history"] if h["cb"]]
         self.assertTrue(len(cbs) > 0, "超额回撤应触发熔断")
         self.assertEqual(cbs[0]["scale"], E.CB_EXPOSURE)
+
+    def test_circuit_breaker_rolling_window(self):
+        # P0-2 回归：熔断 run_max 改 252 日滚动窗口——旧实现全历史单调不减（99.67% 交易日>0），
+        # 条件退化为 exc20<0、8% 参数形同虚设；滚动窗口下"从窗口内高点回撤 ≥8pp 且超额为负"才触发。
+        # 构造：行业持续强跌（-0.5%/日）vs CSI 平稳 → exc20 ≈ -10pp 稳定低于 -8pp → 应触发。
+        inds = {k: [(f"11{i}", 0.0, 0.012, 1.5)] for i, k in enumerate(["A", "B", "C", "D", "E", "F"])}
+        raw = make_raw(inds, csi_mode="calm", seed=3)
+        dates = pd.bdate_range("2015-01-02", "2022-12-30")
+        n = len(dates)
+        rng = np.random.default_rng(3)
+        for code in raw["etfs"]:
+            ret = rng.normal(-0.005, 0.012, n)
+            close = 100 * np.cumprod(1 + ret)
+            kl = []
+            prev = close[0]
+            for i, d in enumerate(dates):
+                c = close[i]
+                kl.append(f"{d.strftime('%Y-%m-%d')},{prev:.4f},{c:.4f},{max(prev,c)*1.002:.4f},"
+                          f"{min(prev,c)*0.998:.4f},1000,5e8,1.0,0.0,0.0,1.5")
+                prev = c
+            raw["etfs"][code]["klines"] = kl
+        panel = E.build_panel(raw)
+        fac = E.compute_factors(panel)
+        bt = E.backtest(panel, fac)
+        cbs = [h for h in bt["holdings_history"] if h["cb"]]
+        self.assertTrue(len(cbs) > 0, "超额深度为负（<-8pp）应触发熔断")
 
     def test_market_filter_spike(self):
         raw = make_raw(six_ind(), csi_mode="spike", seed=9)
@@ -291,6 +378,54 @@ class TestBacktest(unittest.TestCase):
         self.assertLessEqual(m["mdd"], 0.0)
         self.assertGreater(m["years"], 4)
         self.assertIn("2018", m["annual"])
+
+    def test_metrics_annual_consistency(self):
+        # P1-12：annual 以上一年末净值为基准（修复前 g.iloc[0] 为当年首日、已含当日收益 → 连乘缺口 17.10pp）
+        raw = make_raw(six_ind())
+        panel = E.build_panel(raw)
+        fac = E.compute_factors(panel)
+        m = E.backtest(panel, fac)["metrics"]
+        prod = 1.0
+        for v in m["annual"].values():
+            prod *= (1 + v)
+        self.assertAlmostEqual(prod - 1, m["total"], places=4)
+
+    def test_metrics_benchmarks_complete(self):
+        # P1-11：基准同口径指标补全——csi_sharpe/ew_sharpe/IR/同暴露折算/平均暴露
+        raw = make_raw(six_ind())
+        panel = E.build_panel(raw)
+        fac = E.compute_factors(panel)
+        m = E.backtest(panel, fac)["metrics"]
+        self.assertIsNotNone(m["csi_sharpe"])
+        self.assertIsNotNone(m["ew_sharpe"])
+        self.assertIsNotNone(m["csi_ir"])
+        self.assertIsNotNone(m["csi_adj_total"])
+        self.assertIsNotNone(m["ew_adj_total"])
+        self.assertGreater(m["avg_exposure"], 0.0)
+        self.assertLessEqual(m["avg_exposure"], 1.0)
+
+    def test_snapshot_vol_mult_is_multiplier(self):
+        # P2-9：vol_mult 为真实乘数（0.7/1.0），vol_pct 为分位（原实现把分位误标成乘数）
+        raw = make_raw(six_ind())
+        panel = E.build_panel(raw)
+        fac = E.compute_factors(panel)
+        bt = E.backtest(panel, fac)
+        snap = E.snapshot(panel, fac, bt)
+        self.assertTrue(snap["rankings"])
+        for r in snap["rankings"]:
+            self.assertIn(r["vol_mult"], (0.7, 1.0))
+            self.assertIsNotNone(r["vol_pct"])
+
+    def test_snapshot_pending_rebalance(self):
+        # P2-1：末日挂单显式输出 pending_rebalance（None=无挂单；挂单日=目标暴露）
+        raw = make_raw(six_ind())
+        panel = E.build_panel(raw)
+        fac = E.compute_factors(panel)
+        bt = E.backtest(panel, fac)
+        snap = E.snapshot(panel, fac, bt)
+        self.assertIn("pending_rebalance", snap["risk"])
+        self.assertIn("params", snap)
+        self.assertIn("cb_lookback", snap["params"])
 
 
 if __name__ == "__main__":

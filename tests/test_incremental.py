@@ -30,12 +30,55 @@ class TestMerge(unittest.TestCase):
         new_bad = [kl("2026-09-22", 10.2)]  # 间隔 18 天 → 缺口
         self.assertGreater(S.kline_gap_days(old, new_bad), 10)
 
-    def test_scale_jump_detects_ex_dividend(self):
+    def test_overlap_scale_detects_ex_dividend(self):
+        # v1.1（P1-10）：增量 beg=base_day 含重叠日，同一交易日新旧收盘价比=精确复权因子
         old = [kl("2026-09-04", 10.0)]
-        new = [kl("2026-09-07", 8.5)]     # -15% 跳变 → 除权，刻度失效
-        self.assertTrue(S.kline_scale_jump(old, new))
-        new_ok = [kl("2026-09-07", 10.1)]  # +1% 正常
-        self.assertFalse(S.kline_scale_jump(old, new_ok))
+        new = [kl("2026-09-04", 8.5), kl("2026-09-07", 8.6)]   # 重叠日 -15% → 除权，刻度失效
+        self.assertGreaterEqual(S.kline_overlap_scale(old, new), S.KLINE_SCALE_TOL)
+        new_ok = [kl("2026-09-04", 10.0), kl("2026-09-07", 10.1)]   # 重叠日价格一致 → 正常
+        self.assertLess(S.kline_overlap_scale(old, new_ok), S.KLINE_SCALE_TOL)
+        # 无重叠日（数据源异常）→ None，由调用方按缺口逻辑处理
+        self.assertIsNone(S.kline_overlap_scale(old, [kl("2026-09-07", 10.2)]))
+
+    def test_clean_intraday_removes_half_bar(self):
+        # v1.1（P0-1）：盘中半截 bar 清洗——以抓取时刻 fetched_at 为收盘参照。
+        # 盘中（09:49）抓取：末日=抓取当天（未收盘）> 最近已收盘交易日 → 剔除。
+        import datetime
+        ref = datetime.datetime.now().replace(hour=9, minute=49, second=0, microsecond=0)
+        ref = ref.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
+        lc = S.last_closed_date(ref)          # 盘中抓取 → 昨天（或最近交易日）
+        today = ref.date()
+        d1 = lc - datetime.timedelta(days=1)
+        rows = [kl(str(d1), 10.0), kl(str(lc), 10.1), kl(str(today), 10.2)]
+        raw = {"fetched_at": ref.strftime("%Y-%m-%d %H:%M"),
+               "etfs": {"512760": {"industry": "半导体", "name": "x", "klines": rows}},
+               "csi": {}, "failures": []}
+        raw2, removed = S.clean_intraday(raw)
+        self.assertEqual(len(removed), 1)
+        self.assertEqual([r.split(",")[0] for r in raw2["etfs"]["512760"]["klines"]][-1], str(lc))
+
+    def test_clean_intraday_closed_ref_keeps_full_day(self):
+        # v1.1：收盘后（16:00）抓取：末日==最近已收盘交易日（完整 bar）→ 保留，不误删
+        import datetime
+        ref = datetime.datetime.now().replace(hour=16, minute=0, second=0, microsecond=0)
+        ref = ref.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
+        lc = S.last_closed_date(ref)
+        rows = [kl(str(lc - datetime.timedelta(days=1)), 10.0), kl(str(lc), 10.1)]
+        raw = {"fetched_at": ref.strftime("%Y-%m-%d %H:%M"),
+               "etfs": {"512760": {"industry": "半导体", "name": "x", "klines": rows}},
+               "csi": {}, "failures": []}
+        raw2, removed = S.clean_intraday(raw)
+        self.assertEqual(len(removed), 0)
+        self.assertEqual([r.split(",")[0] for r in raw2["etfs"]["512760"]["klines"]][-1], str(lc))
+
+    def test_clean_intraday_future_bar(self):
+        # 末日严格晚于最近已收盘交易日（如盘中抓到当日未收盘 bar）→ 剔除
+        raw = {"etfs": {"512760": {"industry": "半导体", "name": "x",
+                                   "klines": [kl("2026-09-08", 10.0), kl("2099-01-01", 10.5)]}},
+               "csi": {}, "failures": []}
+        raw2, removed = S.clean_intraday(raw)
+        self.assertEqual([r.split(",")[0] for r in raw2["etfs"]["512760"]["klines"]][-1], "2026-09-08")
+        self.assertEqual(len(removed), 1)
 
     def test_merge_csi(self):
         old = [{"tradeDate": "2026-09-01", "close": 100.0}, {"tradeDate": "2026-09-02", "close": 101.0}]

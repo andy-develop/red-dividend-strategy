@@ -27,6 +27,8 @@
 """
 import json, os, sys, datetime, gzip, time, glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import numpy as np
+import pandas as pd
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE)
@@ -58,6 +60,13 @@ FETCH_RETRIES_QUICK = 2   # SECTOR_QUICK=1（CI）：封锁时快速失败（2 �
 FULL_EVERY_DAYS = 7    # 基线陈旧超过该天数 → 全量重抓（周基线轮换）
 KEEP_INCR = 30         # 增量归档保留个数
 KEEP_WEEK = 2          # 全量周归档保留个数
+KLINE_SCALE_TOL = 0.005   # 前复权重叠日收盘价比阈值（>0.5% 判除权，v1.1 精确复权因子）
+MIN_DAILY_AMT = 5e7    # 流动性披露阈值：近 60 日均成交额 <5000 万 → 披露（P1-9，与 README 口径一致）
+
+# ============ 交易日历（P0-1：收盘状态硬校验，与红利低波流水线同源） ============
+_CAL = os.path.join(BASE, "trade_calendar.csv")
+_TRADE_DAYS = (set(pd.read_csv(_CAL, parse_dates=["trade_date"])["trade_date"].dt.date.tolist())
+               if os.path.exists(_CAL) else None)
 
 
 def bj_now():
@@ -91,14 +100,116 @@ def kline_gap_days(old, new_rows):
     return (first_new - last_old).days
 
 
-def kline_scale_jump(old, new_rows, tol=0.11):
-    """前复权刻度检测：基线末日与增量首日收盘价跳变 ≥ tol → 期间除权、历史刻度已失效，需全量兜底。
-    （fqt=1 前复权以最新价为基准回溯调整，除权后旧基线整体刻度过期，增量拼接会产生价格断层）"""
+def kline_overlap_scale(old, new_rows):
+    """精确复权因子检测（P1-10）：增量首日须与基线末日重叠（beg=base_day 多取 1 个重叠日）。
+    同一交易日（base_day）新旧收盘价比即复权因子：|因子-1| ≥ KLINE_SCALE_TOL → 期间除权、
+    旧基线历史刻度整体失效 → 需全量兜底。返回 |ratio-1| 或 None（无重叠日，由调用方按缺口逻辑处理）。"""
     if not old or not new_rows:
-        return False
+        return None
+    ov = [r for r in new_rows if _kl_date(r) == _kl_date(old[-1])]
+    if not ov:
+        return None
     p_old = float(old[-1].split(",")[2])
-    p_new = float(new_rows[0].split(",")[2])
-    return p_old > 0 and abs(p_new / p_old - 1.0) >= tol
+    p_new = float(ov[0].split(",")[2])
+    if p_old <= 0:
+        return None
+    return abs(p_new / p_old - 1.0)
+
+
+# ============ 收盘状态硬校验（P0-1：盘中半截 K 线 + 增量不自愈） ============
+
+def last_closed_date(ref=None):
+    """最近一个已收盘交易日：参考时刻 ref（datetime 带时区，缺省=当前）当日
+    已过收盘时刻（北京 15:30 保守）才算收盘；否则取参考日前一交易日。
+    交易日历缺失时降级周末判断。
+    v1.1 修复：① 原实现把未收盘的今天直接当收盘日，盘中抓取时活跃 ETF 的
+    半截行（amount 达全天 60%+）漏检污染末日面板；
+    ② 收盘后重放盘中抓取的 raw，若用当前时刻会误判半截行为完整 bar——
+    须以 raw 的 fetched_at 为参考（见 clean_intraday）。"""
+    if ref is None:
+        ref = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+    today = ref.date()
+    closed_today = ref.hour * 60 + ref.minute >= 15 * 60 + 30
+    if _TRADE_DAYS is None:
+        d = today if closed_today else today - datetime.timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= datetime.timedelta(days=1)
+        return d
+    cand = sorted(d for d in _TRADE_DAYS if d <= today)
+    if cand and cand[-1] == today and not closed_today:
+        cand.pop()
+    return cand[-1] if cand else today
+
+
+def clean_intraday(raw):
+    """剔除盘中半截 K 线（P0-1）：末日 > 最近已收盘交易日 → 未收盘 bar，剔除。
+    收盘参照 = 抓取时刻 fetched_at：盘中抓的 raw（末日=抓取当天未收盘）在收盘后
+    重放时，半截行仍按抓取时刻判定剔除（用当前时刻会误判半截行为完整 bar）。
+    注：不再做成交额半截检测——以 fetched_at 为参照后，抓取当天（未收盘）的行
+    必然 > 最近收盘日被本规则剔除；对历史完整日做 amount 检测会把真实缩量日
+    （如 09-10 全天成交仅近 5 日均 51%）误删。
+    返回 (raw, removed)；removed 为 [{code,name,date,reason}] 供披露/审计。"""
+    lc = last_closed_date()
+    ref = None
+    fa = raw.get("fetched_at")
+    if fa and fa != "dry-run":
+        try:
+            ref = datetime.datetime.strptime(fa, "%Y-%m-%d %H:%M").replace(
+                tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
+            lc = last_closed_date(ref)
+        except ValueError:
+            pass
+    removed = []
+    for code, v in raw.get("etfs", {}).items():
+        kl = v.get("klines", [])
+        if not kl:
+            continue
+        last_d = datetime.date.fromisoformat(_kl_date(kl[-1]))
+        if last_d > lc:
+            removed.append({"code": code, "name": v.get("name", ""), "date": str(last_d), "reason": "未收盘bar"})
+            v["klines"] = kl[:-1]
+    return raw, removed
+
+
+def data_quality(raw):
+    """数据质量摘要（P1-9）：换手率范围校验（0<turn<100）+ 成交额零值 + 流动性不达标披露。
+    返回 warn 级 issues（不阻断发布）。"""
+    issues = []
+    turn_bad = {}
+    amt_zero = {}
+    low_liq = []
+    for code, v in raw.get("etfs", {}).items():
+        kl = v.get("klines", [])
+        bad, zero = 0, 0
+        for r in kl:
+            p = r.split(",")
+            if len(p) < 11:
+                continue
+            try:
+                to, amt = float(p[10]), float(p[6])
+            except ValueError:
+                continue
+            if not (0.0 < to < 100.0):
+                bad += 1
+            if amt <= 0:
+                zero += 1
+        if bad:
+            turn_bad[f"{code} {v.get('name','')}"] = bad
+        if zero:
+            amt_zero[f"{code} {v.get('name','')}"] = zero
+        # 流动性：近 60 个有效成交额均值
+        amts = [float(r.split(",")[6]) for r in kl[-60:] if len(r.split(",")) >= 11]
+        if len(amts) >= 20 and np.mean(amts) < MIN_DAILY_AMT:
+            low_liq.append(f"{code} {v.get('name','')} 日均{np.mean(amts)/1e4:.0f}万")
+    if turn_bad:
+        items = "；".join(f"{k}×{v}行" for k, v in list(turn_bad.items())[:6])
+        issues.append(f"换手率越界(0<turn<100) {sum(turn_bad.values())} 行：{items}")
+    if amt_zero:
+        items = "；".join(f"{k}×{v}行" for k, v in list(amt_zero.items())[:6])
+        issues.append(f"成交额零值 {sum(amt_zero.values())} 行：{items}")
+    if low_liq:
+        issues.append(f"近60日均成交额<5000万 {len(low_liq)} 只：{'；'.join(low_liq)}")
+    return issues
 
 
 def merge_csi(old, new_rows):
@@ -170,17 +281,24 @@ def _grab_em(raw, codes, start, incr=None, base_raw=None):
             try:
                 new_rows = f.result()["klines"]
                 if incr is not None and base_raw is not None and old:
-                    if kline_scale_jump(old, new_rows) or kline_gap_days(old, new_rows) > 10:
+                    # v1.1（P1-10）：精确复权因子（重叠日）替代 11% 阈值猜测——分红 0.5~3% 可检出、
+                    # 创业板 ±20% 真涨幅不再假阳性；无重叠日时退回缺口检测
+                    scale_jump = kline_overlap_scale(old, new_rows)
+                    gap = kline_gap_days(old, new_rows)
+                    if (scale_jump is not None and scale_jump >= KLINE_SCALE_TOL) or (scale_jump is None and gap > 10):
                         d2 = U.fetch_em_kline(code, start=U.FETCH_START, retries=retries,
                                               timeout=20 if quick else 40)
                         merged = d2["klines"]
                         incr["etfs"][code] = d2["klines"]
-                        print(f"      {code} {name} 刻度/缺口检测触发，全量兜底（{len(merged)} 行）")
+                        print(f"      {code} {name} 复权/缺口检测触发，全量兜底（{len(merged)} 行）")
                     else:
                         merged = merge_klines(old, new_rows)
                         incr["etfs"][code] = new_rows
                 else:
                     merged = new_rows
+                    # v1.1（P2-4）：基线缺该 ETF 时增量行也写归档，次日 rebuild 不再缺历史
+                    if incr is not None:
+                        incr["etfs"][code] = new_rows
                 raw["etfs"][code] = {"industry": ind, "name": name, "klines": merged}
             except Exception as exc:
                 if quick and old:
@@ -227,17 +345,19 @@ def fetch_incremental():
     if (datetime.date.today() - base_day).days > FULL_EVERY_DAYS:
         print(f"[增量] 基线 {base_day} 陈旧 >{FULL_EVERY_DAYS} 天，全量重抓建立新周基线")
         return fetch_all(), "full", None
-    print(f"[增量] 基线 {base_day}（mode={mode}），只抓 beg={base_day + datetime.timedelta(days=1):%Y%m%d} 至今的增量区间")
+    print(f"[增量] 基线 {base_day}（mode={mode}），抓 beg={base_day:%Y%m%d} 至今（含重叠日，v1.1 精确复权）")
     quick = os.environ.get("SECTOR_QUICK")
     raw = {"fetched_at": bj_now(), "etfs": {}, "csi": {}, "failures": []}
     incr = {"date": datetime.date.today().strftime("%Y%m%d"), "base": os.path.basename(
         sorted(glob.glob(os.path.join(ARCHIVE_DIR, "sector-week-*.json.gz")))[-1]) if glob.glob(
         os.path.join(ARCHIVE_DIR, "sector-week-*.json.gz")) else "legacy",
         "etfs": {}, "csi": {}}
-    start = (base_day + datetime.timedelta(days=1)).strftime("%Y%m%d")
-    if start > datetime.date.today().strftime("%Y%m%d"):
-        # 基线已是最新（如当日 CI 与本地先后触发）：无增量区间，沿用基线
-        print(f"[增量] 基线 {base_day} 已是最新，无增量区间，沿用基线数据")
+    start = base_day.strftime("%Y%m%d")
+    lc = last_closed_date()
+    if base_day >= lc:
+        # 基线已含最近已收盘交易日（如当日 CI 与本地先后触发，或盘中触发时基线=昨日已最新）：
+        # 无增量区间，沿用基线（v1.1：beg=base_day 后原 start>today 判断恒假，改用收盘日比较）
+        print(f"[增量] 基线 {base_day} 已含最近收盘日 {lc}，无增量区间，沿用基线数据")
         return base_raw, "incr", incr
     _grab_em(raw, U.ALL_ETFS, start, incr=incr, base_raw=base_raw)
     # 非 quick：失败项冷却一轮重试（保持鲁棒性）
@@ -285,7 +405,10 @@ def archive_incremental(mode, raw, incr):
 
 
 def validate(raw):
-    """硬校验：有效行业（有 ≥1 只成员 ETF 数据 ≥ MIN_HISTORY 日）占比 < 80% 直接失败。
+    """硬校验：
+    1) 有效行业（有 ≥1 只成员 ETF 数据 ≥ MIN_HISTORY 日）占比 < 80% → 失败；
+    2) 标的级断言（P2-3）：32 只 ETF 缺失 ≥3 只 → 失败；
+    3) 时效性硬校验（P0-1）：ETF 末日晚于最近已收盘交易日 → 失败（clean_intraday 后仍违反说明数据源异常）。
     返回 (ok_inds, ratio, issues)。"""
     issues = []
     ok = 0
@@ -297,10 +420,27 @@ def validate(raw):
         else:
             issues.append(f"{ind}({','.join(codes) or '无'}) 仅 {best} 日")
     ratio = ok / len(U.INDUSTRY_LIST)
-    if ratio < U.MIN_VALID_RATIO:
-        raise RuntimeError(
-            f"有效行业 {ok}/{len(U.INDUSTRY_LIST)}（{ratio:.0%}）< {U.MIN_VALID_RATIO:.0%}，"
-            f"拒绝发布：" + "；".join(issues))
+    # 标的级断言（P2-3）
+    missing = [code for _, code, _ in U.ALL_ETFS
+               if code not in raw["etfs"] or not raw["etfs"][code].get("klines")]
+    if missing:
+        issues.append(f"缺失 {len(missing)}/{len(U.ALL_ETFS)} 只 ETF: {','.join(missing[:10])}")
+    # 时效性硬校验（P0-1）
+    lc = last_closed_date()
+    late = [f"{code} {raw['etfs'][code].get('name','')} 末日 {_kl_date(raw['etfs'][code]['klines'][-1])}"
+            for code, v in raw["etfs"].items()
+            if v.get("klines") and datetime.date.fromisoformat(_kl_date(v["klines"][-1])) > lc]
+    if late:
+        issues.append(f"{len(late)} 只 ETF 末日晚于最近已收盘交易日 {lc}：{'；'.join(late[:6])}")
+    if ratio < U.MIN_VALID_RATIO or len(missing) >= 3 or late:
+        parts = []
+        if ratio < U.MIN_VALID_RATIO:
+            parts.append(f"有效行业 {ok}/{len(U.INDUSTRY_LIST)}（{ratio:.0%}）< {U.MIN_VALID_RATIO:.0%}")
+        if len(missing) >= 3:
+            parts.append(f"ETF 缺失 {len(missing)} 只")
+        if late:
+            parts.append(f"末日超前 {len(late)} 只")
+        raise RuntimeError("硬校验失败：" + "；".join(parts) + "。" + "；".join(issues[:8]))
     return ok, ratio, issues
 
 
@@ -309,15 +449,51 @@ def thin_series(arr, n):
     idx = list(range(0, len(arr), step))
     if idx[-1] != len(arr) - 1:
         idx.append(len(arr) - 1)
+    # v1.1（P2-10）：强制包含 argmin/argmax——等步长抽样可能错过回撤/峰值极值点，
+    # 图上回撤比 metrics.mdd 浅的失真即由此而来
+    for m in (np.argmin(arr), np.argmax(arr)):
+        m = int(m)
+        if m not in idx:
+            idx.append(m)
+    idx = sorted(idx)
     return [round(float(arr[i]), 6) for i in idx], [str(arr[i]) for i in idx]
+
+
+def cost_sensitivity(panel, fac):
+    """成本敏感性（P1-14）：滑点+佣金费率按 1/2/4/6 倍重跑回测，输出总收益/夏普/回撤/成本占比。
+    纯函数（模块级费率参数临时改写后还原），dry-run 幂等。"""
+    orig = (E.SLIP_BPS, E.COMM_RATE, E.COMM_MIN)
+    out = {}
+    try:
+        for mult in (1, 2, 4, 6):
+            E.SLIP_BPS = orig[0] * mult
+            E.COMM_RATE = orig[1] * mult
+            E.COMM_MIN = orig[2] * mult
+            m = E.backtest(panel, fac)["metrics"]
+            out[f"{mult}x"] = {"total": m.get("total"), "sharpe": m.get("sharpe"),
+                               "mdd": m.get("mdd"), "cost_pct": m.get("cost_pct"),
+                               "n_trades": m.get("n_trades")}
+    finally:
+        E.SLIP_BPS, E.COMM_RATE, E.COMM_MIN = orig
+    return out
+
+
+def load_sensitivity():
+    """读 data/sector-sensitivity.json（P0-4 过拟合体检，由 sector_sensitivity.py 生成）。
+    文件缺失/损坏时返回 None（页面隐藏体检卡，不阻断发布）。"""
+    p = os.path.join(ARCHIVE_DIR, "sector-sensitivity.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 def build_sector_payload(panel, fac, bt, snap, issues, raw):
     """页面用 sector 数据段：排行 / 持仓 / 风控 / 回测曲线 / 交易 / 年度 / ETF 映射 / 披露。"""
     n = len(bt["dates"])
     s_nav, s_dates = thin_series(bt["nav"], 950)
-    _, _ = thin_series(bt["csi_nav"], 950)
-    c_nav = thin_series(bt["csi_nav"], 950)[0]
+    c_nav = thin_series(bt["csi_nav"], 950)[0]   # v1.1（P2-11）移除重复调用
     e_nav = thin_series(bt["ew_nav"], 950)[0]
     s_dd = thin_series(bt["dd"], 950)[0]
     c_dd = thin_series(bt["csi_dd"], 950)[0]
@@ -333,7 +509,7 @@ def build_sector_payload(panel, fac, bt, snap, issues, raw):
     return {
         "generated_at": bj_now(),
         "data_date": snap["data_date"],
-        "version": "v1.0",
+        "version": "v1.1",
         "start": E.START,
         "universe": snap["universe"],
         "rankings": snap["rankings"],
@@ -341,6 +517,8 @@ def build_sector_payload(panel, fac, bt, snap, issues, raw):
         "risk": snap["risk"],
         "params": snap["params"],
         "metrics": m,
+        "cost_sensitivity": cost_sensitivity(panel, fac),
+        "sensitivity": load_sensitivity(),
         "dates": s_dates,
         "strategy_nav": s_nav,
         "csi_nav": c_nav,
@@ -359,16 +537,21 @@ def build_sector_payload(panel, fac, bt, snap, issues, raw):
             "实现口径：行业篮子＝成员 ETF 日收益等权合成；行业价格＝篮子累计净值 ×100；成交额求和、换手率取均值。",
             "信号＝动量 50%（20 日跳过近 5 日 + 60 日 + 120 日，年化 × 各自 R² 趋势质量后等权，截面 z 标准化）"
             "＋波动率 20%（20 日已实现波动率截面前 30% ×0.7）＋拥挤度 20%（60 日均换手 3 年分位 0.5 + 成交额占比 60 日变化 3 年分位 0.5，截面前 20% ×0.85）"
-            "＋反转 10%（近 5 日跌幅截面前 10% 行业 +0.15）。",
+            "＋反转 10%（近 5 日跌幅截面前 10% 行业 +0.15，小截面按名次放宽到至少最差 1 名）。"
+            "截面分位仅基于已入池行业（v1.1 修复未入池行业污染截面统计）。",
             "拥挤度 v1 暂缺「份额变化率」第三维：东财无稳定历史份额接口，页面按两维合成并在参数表中如实标注；"
             "后续接份额数据后按方案恢复 1/3 等权。",
-            "持仓：月度最后一个交易日决策、T+1 收盘成交，持有 Top-4 行业等权；换仓门槛 15%（新入选 ≥ 当前持仓最低分 ×1.15），"
-            "持仓得分排名前 60% 留仓观察；月中加速：持仓跌出前 50% 且候选 ≥ 持仓最高分 ×1.2 时当月额外轮动一次（每月最多一次）。",
-            "执行口径：成交价＝执行日行业收盘价 ×(1±单边 6bp)，双边 12bp（落在方案千 1~千 1.5 区间）；单月换手 ≤100%，超出按得分保留高分行。",
-            "风控：策略近 20 日超额收益（vs 沪深300 全收益）自高点回撤 >8% → 仓位 50% 并暂停开仓，超额转正后恢复"
-            "（触发需连续确认 5 日、熔断至少保持 10 个交易日，防抖）；单行业自建仓成本回撤 >12% 无条件平仓；"
-            "沪深300 60 日波动率处过去一年 >80% 分位 → 仓位上限 70%，>90% → 50%（调仓日生效）。",
-            "基准：沪深300 全收益 + 行业等权；回测 2018 至今，初始 10 万；夏普年化 252 日、无风险利率 0。",
+            "持仓：月度最后一个交易日决策、T+1 收盘成交，持有 Top-4 行业等权；换仓门槛 +0.15（z 分加法，"
+            "v1.1 修复乘法门槛在负分下方向反转）；持仓得分排名前 60% 留仓观察；月中加速：持仓跌出前 50% 且候选 ≥ 持仓最高分 +0.20 时当月额外轮动一次（每月最多一次）。",
+            "执行口径：成交价＝执行日行业收盘价 ×(1±滑点 5bp)；佣金＝max(成交额×万1, 5 元/笔)（v1.1 修复小单佣金低估，"
+            "单边实际约 9bp）；单月换手 ≤100%，超出按得分保留高分行。",
+            "风控：策略近 20 日超额收益（vs 沪深300 全收益）自近 252 日滚动窗口高点回撤 ≥8pp 且超额为负 → 仓位 50% 并暂停开仓，"
+            "市场 20 日动量转正后恢复（v1.1 修复 run_max 单调不减支配；触发需连续确认 5 日、熔断至少保持 10 个交易日，防抖）；"
+            "单行业自建仓成本回撤 >12% 无条件平仓；沪深300 60 日波动率处过去一年 >80% 分位 → 仓位上限 70%，>90% → 50%（调仓日生效）。",
+            "基准：沪深300 全收益 + 行业等权（含夏普/信息比率/同暴露折算，v1.1 补全——策略平均暴露约 63%，"
+            "与 100% 暴露基准直接比总收益不公平，请以同暴露折算行对比）；回测 2018 至今，初始 10 万；夏普年化 252 日、无风险利率 0。",
+            "标的池 21 行业 × 32 只 ETF（v1.1 修正 30 文案）；为 2026-09 时点人工挑选、以今日视角回溯历史，存在幸存者/前视偏差；"
+            "早期年份可选行业少（2018 年仅 4 行业入池，轮动近乎全部持有）。流动性/换手率异常见页底数据质量披露。",
             "信号与回测基于行业篮子净值（成员等权），实盘请按 ETF 映射以相应 ETF 执行，存在跟踪误差。",
             "本页面仅供策略验证与监控参考，不构成投资建议。",
         ],
@@ -391,12 +574,19 @@ def archive(raw, payload):
 def main():
     if _FETCH_ONLY:
         # CI 用：增量抓取+硬校验，原始 JSON 写盘，供 --raw 三跑共用（抓取量 3×→1×，且只抓增量区间）
-        print("[fetch-only] 增量抓取 21 行业 × 30 ETF + 沪深300（并发 {}）...".format(FETCH_WORKERS))
+        print("[fetch-only] 增量抓取 21 行业 × {} ETF + 沪深300（并发 {}）...".format(len(U.ALL_ETFS), FETCH_WORKERS))
         raw, mode, incr = fetch_incremental()
+        raw, removed = clean_intraday(raw)   # v1.1（P0-1）收盘清洗：剔除盘中半截 bar
+        dq = data_quality(raw)               # v1.1（P1-9）换手率/流动性质量摘要
         etfs_ok = len(raw["etfs"])
         print(f"      ETF 有效 {etfs_ok}/{len(U.ALL_ETFS)}；失败 {len(raw['failures'])}；"
               f"CSI 全收益/价格 {len(raw['csi'].get('H00300', []))}/{len(raw['csi'].get('000300', []))} 条")
+        if removed:
+            print(f"      [收盘清洗] 剔除 {len(removed)} 条半截/未收盘 bar：")
+            for r in removed[:10]:
+                print(f"        {r['code']} {r['name']} {r['date']} {r['reason']}")
         ok_inds, ratio, issues = validate(raw)
+        issues = dq + issues
         print(f"      有效行业 {ok_inds}/{len(U.INDUSTRY_LIST)}（{ratio:.0%}）")
         for w in issues:
             print("  [警告]", w)
@@ -408,14 +598,26 @@ def main():
     if _RAW:
         print(f"[1/4] 使用归档原始数据重跑（{_RAW}，跳过抓取）...")
         raw = load_raw(_RAW)
+        raw, removed = clean_intraday(raw)
+        dq = data_quality(raw)
     else:
-        print("[1/4] 增量抓取 21 行业 × 30 ETF + 沪深300（并发 {}）...".format(FETCH_WORKERS))
+        print("[1/4] 增量抓取 21 行业 × {} ETF + 沪深300（并发 {}）...".format(len(U.ALL_ETFS), FETCH_WORKERS))
         raw, mode, incr = fetch_incremental()
+        # v1.1（修复隐式归档缺失）：本地直跑也写增量/全量归档——原注释声称"已在抓取阶段完成"
+        # 但 fetch_incremental 从不调用 archive_incremental，次日 rebuild_base 会缺今天增量
+        archive_incremental(mode, raw, incr)
+        raw, removed = clean_intraday(raw)
+        dq = data_quality(raw)
     etfs_ok = len(raw["etfs"])
     print(f"      ETF 成功 {etfs_ok}/{len(U.ALL_ETFS)}；失败 {len(raw['failures'])}；"
           f"CSI 全收益/价格 {len(raw['csi'].get('H00300', []))}/{len(raw['csi'].get('000300', []))} 条")
-    print("[2/4] 硬校验（有效行业占比）...")
+    if removed:
+        print(f"      [收盘清洗] 剔除 {len(removed)} 条半截/未收盘 bar：")
+        for r in removed[:10]:
+            print(f"        {r['code']} {r['name']} {r['date']} {r['reason']}")
+    print("[2/4] 硬校验（有效行业占比 + 标的齐备 + 时效性）...")
     ok_inds, ratio, issues = validate(raw)
+    issues = dq + issues
     print(f"      有效行业 {ok_inds}/{len(U.INDUSTRY_LIST)}（{ratio:.0%}）")
     for w in issues:
         print("  [警告]", w)

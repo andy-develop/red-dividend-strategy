@@ -1,0 +1,183 @@
+{
+ "baseline": {
+  "total": 1.0211,
+  "sharpe": 0.558,
+  "mdd": -0.3565,
+  "n_trades": 499
+ },
+ "sensitivity": [
+  {
+   "param": "TOP_N",
+   "value": 3,
+   "total": 1.9267,
+   "sharpe": 0.725,
+   "mdd": -0.3573,
+   "n_trades": 362
+  },
+  {
+   "param": "TOP_N",
+   "value": 5,
+   "total": 0.8671,
+   "sharpe": 0.523,
+   "mdd": -0.3967,
+   "n_trades": 667
+  },
+  {
+   "param": "SWAP_GAP",
+   "value": 0.1,
+   "total": 1.0211,
+   "sharpe": 0.558,
+   "mdd": -0.3565,
+   "n_trades": 499
+  },
+  {
+   "param": "SWAP_GAP",
+   "value": 0.2,
+   "total": 0.9864,
+   "sharpe": 0.548,
+   "mdd": -0.3565,
+   "n_trades": 496
+  },
+  {
+   "param": "STAY_PCT",
+   "value": 0.5,
+   "total": 1.9925,
+   "sharpe": 0.774,
+   "mdd": -0.3062,
+   "n_trades": 533
+  },
+  {
+   "param": "STAY_PCT",
+   "value": 0.7,
+   "total": 0.6895,
+   "sharpe": 0.452,
+   "mdd": -0.3585,
+   "n_trades": 501
+  },
+  {
+   "param": "CB_EXCESS_DD",
+   "value": 0.05,
+   "total": 1.077,
+   "sharpe": 0.578,
+   "mdd": -0.3612,
+   "n_trades": 520
+  },
+  {
+   "param": "CB_EXCESS_DD",
+   "value": 0.12,
+   "total": 1.4406,
+   "sharpe": 0.626,
+   "mdd": -0.3015,
+   "n_trades": 405
+  },
+  {
+   "param": "SL_STOP",
+   "value": 0.08,
+   "total": 0.4399,
+   "sharpe": 0.361,
+   "mdd": -0.4278,
+   "n_trades": 467
+  },
+  {
+   "param": "SL_STOP",
+   "value": 0.16,
+   "total": 0.8778,
+   "sharpe": 0.497,
+   "mdd": -0.4543,
+   "n_trades": 514
+  },
+  {
+   "param": "MK_CAP80",
+   "value": 0.6,
+   "total": 1.0185,
+   "sharpe": 0.558,
+   "mdd": -0.3565,
+   "n_trades": 501
+  },
+  {
+   "param": "MK_CAP80",
+   "value": 0.8,
+   "total": 0.9834,
+   "sharpe": 0.547,
+   "mdd": -0.3565,
+   "n_trades": 507
+  },
+  {
+   "param": "MK_CAP90",
+   "value": 0.4,
+   "total": 0.9543,
+   "sharpe": 0.542,
+   "mdd": -0.3514,
+   "n_trades": 517
+  },
+  {
+   "param": "MK_CAP90",
+   "value": 0.6,
+   "total": 0.7623,
+   "sharpe": 0.474,
+   "mdd": -0.3473,
+   "n_trades": 540
+  },
+  {
+   "param": "SLIP_BPS",
+   "value": 2,
+   "total": 1.067,
+   "sharpe": 0.558,
+   "mdd": -0.3535,
+   "n_trades": 499
+  },
+  {
+   "param": "SLIP_BPS",
+   "value": 10,
+   "total": 1.0066,
+   "sharpe": 0.577,
+   "mdd": -0.349,
+   "n_trades": 509
+  }
+ ],
+ "walk_forward": [
+  {
+   "period": "2018-2020",
+   "start": "2018-01-01",
+   "end": "2020-12-31",
+   "total": 0.8198,
+   "sharpe": 1.156,
+   "mdd": -0.1897,
+   "n_trades": 177
+  },
+  {
+   "period": "2021-2023",
+   "start": "2021-01-01",
+   "end": "2023-12-29",
+   "total": 0.0496,
+   "sharpe": 0.222,
+   "mdd": -0.2701,
+   "n_trades": 179
+  },
+  {
+   "period": "2024-2026",
+   "start": "2024-01-01",
+   "end": "2026-09-10",
+   "total": 0.439,
+   "sharpe": 0.835,
+   "mdd": -0.1967,
+   "n_trades": 106
+  }
+ ],
+ "random_control": {
+  "n": 150,
+  "seed": 42,
+  "sharpe": {
+   "mean": 0.371,
+   "p50": 0.366,
+   "p95": 0.639,
+   "max": 0.933
+  },
+  "total_mean": 0.3966,
+  "real_sharpe": 0.558,
+  "percentile": 0.88,
+  "p_value": 0.12
+ },
+ "note": "固定 seed 42；随机对照仅替换得分（同日程/门槛/留仓/换手/风控）；PBO / Deflated Sharpe 未实现（见交付说明披露）",
+ "cleaned_bars": 2
+}

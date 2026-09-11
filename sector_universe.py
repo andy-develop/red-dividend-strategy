@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ETF 行业轮动 · 标的池与行情抓取（v1.0）
+"""ETF 行业轮动 · 标的池与行情抓取（v1.1）
 
 数据源（纯 HTTP，无 akshare，GitHub Actions 可用）：
   1) 行业 ETF 日行情：东方财富 push2his K 线接口（前复权收盘 / 成交量 / 成交额 / 换手率）
@@ -8,9 +8,11 @@
      - 换手率 / 成交额用于拥挤度因子（换手率分位 + 成交额占比变化）
   2) 沪深300（全收益 H00300 + 价格 000300）：中证指数官网 index-perf 接口（与红利低波流水线同源）
 
-标的池（v1.0 定稿，21 行业 × 30 只 ETF，2026-09 可用性实测）：
+标的池（v1.0 定稿，21 行业 × 32 只 ETF，2026-09 可用性实测）：
   按方案第二节：行业映射（每只 ETF 映射唯一主行业）→ 流动性筛选（取两市最活跃品种）
   → 同行业取 1-2 只（规模/流动性兼顾）。信号在“行业篮子”上计算（成员等权），交易映射回 ETF。
+  披露（v1.1，P1-13）：标的池为 2026-09 时点人工挑选，以今日视角回溯历史存在幸存者/前视偏差；
+  早期年份可选行业少（2018 年仅 4 行业入池，轮动近乎全部持有）。
 """
 import json, os, time, datetime, threading
 import urllib.request
@@ -97,8 +99,11 @@ def fetch_em_kline(code, start=FETCH_START, end=None, retries=6, timeout=40):
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 j = json.loads(r.read().decode("utf-8"))
             d = j.get("data") or {}
+            # v1.1（P2-5）：空响应兜底——增量区间无交易日/数据缺失也返回 {"klines": []}，
+            # 避免调用方 f.result()["klines"] 抛 KeyError 被记成普通失败
             if d.get("klines") or start != FETCH_START:
-                return d   # 增量区间无交易日（节假日/未刷新）也合法返回空
+                d.setdefault("klines", [])
+                return d
             last = ValueError("empty klines")
         except Exception as e:
             last = e

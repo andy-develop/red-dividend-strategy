@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ETF 行业轮动 · 统一策略引擎（v1.0，可复现 · 每日更新与回测共用单一实现）
+"""ETF 行业轮动 · 统一策略引擎（v1.1，2026-09-11 审计修复 · 可复现 · 每日更新与回测共用单一实现）
 
 实现《ETF行业轮动量化策略方案》（2026-09）：
   一、核心逻辑：行业截面动量（趋势中段）+ 环境识别与拥挤度控制
-  二、标的池：21 行业 × 30 ETF（sector_universe.py），行业篮子=成员等权
+  二、标的池：21 行业 × 32 ETF（sector_universe.py），行业篮子=成员等权
   三、信号（多因子复合）：
      - 动量因子（约 50%）：20 日动量跳过最近 5 日 + 60 日 + 120 日，年化×各自 R²（趋势质量）后等权合成，截面 z 标准化
      - 波动率调整（约 20%）：20 日已实现波动率截面前 30% → 动量 ×0.7
      - 拥挤度控制（约 20%）：60 日均换手率 3 年分位 + 成交额占比 60 日变化 3 年分位，合成后截面前 20% → ×0.85
        （v1 暂缺 ETF 份额变化率维度——东财无稳定历史份额接口，见页面数据口径说明）
-     - 宏观/情绪辅助（约 10%）：近 5 日跌幅截面前 10% 行业 +0.15 反转加分
+     - 宏观/情绪辅助（约 10%）：近 5 日跌幅截面前 10% 行业 +0.15 反转加分（小截面按名次放宽）
      - final = mom_z × vol_mult × crowd_mult + rev_bonus
   四、组合与调仓：
      - 月度调仓（每月最后一个交易日决策，T+1 收盘执行），持有 Top-4 行业等权
-     - 换仓门槛：新入选行业得分须 ≥ 当前持仓最低分 ×1.15；持仓得分排名前 60% 留仓观察
-     - 月中加速：持仓跌出前 50% 且候选行业得分 ≥ 持仓最高分 ×1.2 → 当月额外轮动一次
+     - 换仓门槛：新入选行业得分须 ≥ 当前持仓最低分 +0.15（z 分加法，v1.1 修复负分方向反转）
+     - 月中加速：持仓跌出前 50% 且候选行业得分 ≥ 持仓最高分 +0.20 → 当月额外轮动一次
   五、风控：
-     - 动量失效熔断：策略近 20 日超额收益（vs 沪深300全收益）从高点回撤 >8% → 仓位×0.5、暂停新开仓，超额转正恢复
+     - 动量失效熔断：策略近 20 日超额收益（vs 沪深300全收益）从近 252 日滚动窗口高点回撤 ≥8pp 且超额为负
+       → 仓位×0.5、暂停新开仓，市场 20 日动量转正恢复（v1.1 修复 run_max 单调不减支配）
      - 单行业止损：行业篮子自建仓成本回撤 >12% → 无条件平仓
      - 市场状态过滤：沪深300 的 60 日波动率处于过去一年 >90% 分位 → 总仓位上限 50%；>80% → 70%
      - 换手率上限：单月组合换手 ≤100%，超出按得分高低优先保留高分行
-  六、执行口径：决策 T 日收盘 → T+1 收盘成交；单边综合成本 6bp（滑点 5bp + 佣金万1，双边 12bp，落在方案建议的千1~千1.5 区间）；年化 252、夏普无风险利率 0。
+  六、执行口径：决策 T 日收盘 → T+1 收盘成交；单边成本=滑点 5bp + 佣金 max(万1, 5元/笔)
+     （v1.1 修复：原 6bp 固定比例在小单下低估 4bp 级佣金）；年化 252、夏普无风险利率 0。
 
 用法:
   python3 sector_engine.py [--start 2018-01-01]   # 独立回测（在线抓数据）
@@ -33,16 +35,19 @@ import pandas as pd
 
 import sector_universe as U
 
-# ============ 参数（v1.0） ============
+# ============ 参数（v1.1，2026-09-11 审计修复版） ============
 START = U.BACKTEST_START          # 回测起点（2018-01-01；行业动态入池）
 TOP_N = 4                         # 持有 Top-4 行业（方案推荐 3-5，取 4 平衡收益与集中度）
-SWAP_GAP = 0.15                   # 换仓门槛：新入选得分 ≥ 当前持仓最低分 ×(1+15%)
+SWAP_GAP = 0.15                   # 换仓门槛：新入选得分 ≥ 当前持仓最低分 + 0.15（z 分，加法；v1.1 修复负分方向反转）
 STAY_PCT = 0.60                   # 留仓观察：持仓得分排名前 60% 不强制换出
 ACCEL_RANK = 0.50                 # 月中加速：持仓排名跌出前 50%
-ACCEL_GAP = 0.20                  # 月中加速：候选得分 ≥ 持仓最高分 ×(1+20%)
-COST_PER_SIDE = 0.0006            # 单边综合成本 6bp（滑点 5bp + 佣金万1）→ 双边 12bp
+ACCEL_GAP = 0.20                  # 月中加速：候选得分 ≥ 持仓最高分 + 0.20（z 分，加法）
+SLIP_BPS = 5                      # 单边滑点 5bp（v1.1 成本模型拆分：滑点 + 佣金 max(万1, 5元)）
+COMM_RATE = 0.0001                # 佣金费率 万1
+COMM_MIN = 5.0                    # 佣金最低 5 元/笔
 SL_STOP = 0.12                    # 单行业止损：自建仓成本回撤 >12%
-CB_EXCESS_DD = 0.08               # 熔断：20 日超额收益从高点回撤 >8%（或超额从未为正时 < -8%）
+CB_EXCESS_DD = 0.08               # 熔断：20 日超额收益从近 252 日窗口高点回撤 >8pp（且超额为负）才触发
+CB_LOOKBACK = 252                 # 熔断超额滚动回看窗口（v1.1：run_max 改为滚动窗口，修复单调不减支配）
 CB_EXPOSURE = 0.50                # 熔断时仓位降至 50%
 CB_ON_DWELL = 5                   # 触发需连续确认 5 个交易日（防瞬时抖动）
 CB_MIN_ON_DAYS = 10               # 熔断激活后至少保持 10 个交易日（防反复开关）
@@ -119,7 +124,6 @@ def build_panel(raw):
         s = pd.Series(rows).sort_index().reindex(dates).ffill()
         return s.values
     csi_tr = csi_series("H00300") if "H00300" in raw.get("csi", {}) else csi_series("000300")
-    csi_px = csi_series("000300")
     csi_tr_ret = np.zeros(len(dates))
     with np.errstate(divide="ignore", invalid="ignore"):
         _r = csi_tr[1:] / csi_tr[:-1] - 1
@@ -128,7 +132,7 @@ def build_panel(raw):
             "industries": inds, "first_date": str(dates[0].date()), "last_date": str(dates[-1].date())}
     return {"dates": dates, "P": P, "R": R, "AMT": AMT, "TO": TO,
             "active": active, "avail_days": avail_days, "inds": inds,
-            "csi_tr": csi_tr, "csi_px": csi_px, "csi_tr_ret": csi_tr_ret, "meta": meta}
+            "csi_tr": csi_tr, "csi_tr_ret": csi_tr_ret, "meta": meta}
 
 
 def _rolling_percentile(s, w):
@@ -186,16 +190,21 @@ def compute_factors(panel):
         "crowd": crowd.values.reshape(-1),
         "r5": r5.values.reshape(-1),
     })
+    # ---- 截面统计（P1-6：vol_pct/crowd_pct/r5_pct 与 mom_z 一致掩码，未入池行业不参与截面分位） ----
+    lf["pooled"] = panel["avail_days"].T.reshape(-1) >= U.MIN_HISTORY
+    for c in ("mom_raw", "vol20", "crowd", "r5"):
+        lf.loc[~lf["pooled"], c] = np.nan
     lf["mom_z"] = _xs_z(lf, "mom_raw")
     lf["vol_pct"] = _xs_pct(lf, "vol20")
     lf["crowd_pct"] = _xs_pct(lf, "crowd")
     lf["r5_pct"] = _xs_pct(lf, "r5")
     lf["vol_mult"] = np.where(lf["vol_pct"] >= 0.70, 0.7, 1.0)
     lf["crowd_mult"] = np.where(lf["crowd_pct"] >= 0.80, 0.85, 1.0)
-    lf["rev_bonus"] = np.where(lf["r5_pct"] < 0.10, 0.15, 0.0)
+    # 反转名次修复（P0-3）：小截面（N≤10）下 r5_pct 最小=1/N，固定 0.10 阈值永不满足 → 按日入池数放宽到至少最差 1 名
+    n_avail = lf.groupby("date")["pooled"].transform("sum")
+    lf["rev_bonus"] = np.where(lf["r5_pct"] < np.maximum(0.10, 1.0 / n_avail), 0.15, 0.0)
     lf["score"] = lf["mom_z"] * lf["vol_mult"] * lf["crowd_mult"] + lf["rev_bonus"]
-    lf["pooled"] = panel["avail_days"].T.reshape(-1) >= U.MIN_HISTORY
-    for c in ("mom_z", "score"):
+    for c in ("mom_z", "vol_pct", "crowd_pct", "r5_pct", "score"):
         lf.loc[~lf["pooled"], c] = np.nan
 
     def wide(col):
@@ -220,12 +229,12 @@ def _month_end_flags(dates):
 
 
 def select_target(t, cur, score, pooled):
-    """Top-N + 15% 换仓门槛 + 前 60% 留仓观察。返回行业下标列表（模块级，便于单测）。
+    """Top-N + 换仓门槛（z 分加法）+ 前 60% 留仓观察。返回行业下标列表（模块级，便于单测）。
 
     统一规则（持仓满/不满均一致）：
       1. 持仓排名前 60% → 留仓观察（protected），直接保留；
       2. 其余槽位按得分从高到低填充：持仓行业自动保留（非换仓），非持仓行业须
-         得分 ≥ 当前持仓最低分 ×(1+15%) 才允许进入（换仓门槛，防无效换手）；
+         得分 ≥ 当前持仓最低分 + SWAP_GAP（z 分加法；v1.1 修复乘法门槛在负分下方向反转）；
       3. 无合格新进入者时弱持仓保留——宁可少换，不因微小差距反复换仓。
     """
     s = score[:, t]
@@ -249,7 +258,7 @@ def select_target(t, cur, score, pooled):
         if i in held:
             target.add(i)
         else:
-            if s[i] < min_held * (1 + SWAP_GAP):
+            if s[i] < min_held + SWAP_GAP:
                 break
             target.add(i)
     return list(target)
@@ -282,13 +291,15 @@ def apply_turnover_cap(weights, sel, score_col, budget, tgt_w):
     return base, gross, gross / 2.0
 
 
-def backtest(panel, fac, start=START):
-    """月度轮动 + 风控回测（T+1 收盘执行）。"""
+def backtest(panel, fac, start=START, end=None):
+    """月度轮动 + 风控回测（T+1 收盘执行）。end 用于 walk-forward 截断（含 end 当日）。"""
     dates, n = panel["dates"], panel["P"].shape[1]
+    if end is not None:
+        n = min(n, int(np.searchsorted(dates, pd.Timestamp(end), side="right")))
     n_ind = panel["P"].shape[0]
-    P, R = panel["P"], panel["R"]
-    csi_ret = panel["csi_tr_ret"]
-    score, pooled = fac["score"], fac["pooled"]
+    P, R = panel["P"][:, :n], panel["R"][:, :n]   # end 截断：所有数组对齐到 n（v1.1 walk-forward 修复）
+    csi_ret = panel["csi_tr_ret"][:n]
+    score, pooled = fac["score"][:, :n], fac["pooled"][:, :n]
     month_end = _month_end_flags(dates)
     start_i = int(np.searchsorted(dates, pd.Timestamp(start)))
 
@@ -325,7 +336,7 @@ def backtest(panel, fac, start=START):
             for tr in exec_trades:
                 tr["date"] = str(dates[t].date())
                 i = tr["_i"]
-                fill_px = float(P[i, t]) * (1 + COST_PER_SIDE) if tr["action"] == "买入" else float(P[i, t]) * (1 - COST_PER_SIDE)
+                fill_px = float(P[i, t]) * (1 + SLIP_BPS / 10000.0) if tr["action"] == "买入" else float(P[i, t]) * (1 - SLIP_BPS / 10000.0)
                 tr["fill_px"] = round(fill_px, 4)
                 trades.append(tr)
                 if tr["action"] == "买入":
@@ -347,7 +358,9 @@ def backtest(panel, fac, start=START):
             csi_20 = np.prod(1 + csi_ret[t - 19:t + 1]) - 1
             exc20 = st_ret - csi_20
             exc20_hist[t] = exc20
-            exc_vals = exc20_hist[start_i:t + 1]
+            # v1.1（P0-2）：run_max 改近 CB_LOOKBACK(252) 日滚动窗口，修复历史最大值单调不减
+            # 支配触发条件（原实现 run_max 占 99.67% 交易日>0，条件退化为 exc20<0，8% 参数形同虚设）。
+            exc_vals = exc20_hist[max(start_i, t - CB_LOOKBACK + 1):t + 1]
             run_max = float(np.nanmax(exc_vals)) if np.isfinite(exc_vals).any() else 0.0
             if cb_active:
                 cb_days += 1
@@ -358,7 +371,9 @@ def backtest(panel, fac, start=START):
                     cb_active = False
                     cb_days, cb_cand = 0, 0
             else:
-                trig = ((run_max > 0 and exc20 < run_max * (1 - CB_EXCESS_DD) and exc20 < 0)
+                # v1.1（P0-2）：绝对 pp 回撤口径——超额从滚动窗口高点回撤 ≥8pp 且超额为负才触发
+                # （原 run_max×(1-8%) 在 run_max 大时门槛形同虚设，实测退化为纯 exc20<0）。
+                trig = ((run_max > 0 and exc20 < run_max - CB_EXCESS_DD and exc20 < 0)
                         or (run_max <= 0 and exc20 < -CB_EXCESS_DD))
                 if trig:
                     cb_cand += 1
@@ -402,7 +417,7 @@ def backtest(panel, fac, start=START):
                     worst = max(rank_map.get(h, 1.0) for h in held)
                     best_held = max(s[h] for h in held)
                     cands = [i for i in order if i not in set(held) and not np.isnan(s[i])]
-                    if worst > ACCEL_RANK and cands and s[cands[0]] >= best_held * (1 + ACCEL_GAP):
+                    if worst > ACCEL_RANK and cands and s[cands[0]] >= best_held + ACCEL_GAP:
                         rebal, reason = True, "加速轮动"
                         accel_used_month = dates[t].month
 
@@ -430,10 +445,14 @@ def backtest(panel, fac, start=START):
             turn = 0.0
 
         # ---- 止损平仓（无条件，不受换手率上限约束） ----
-        for i in sl_exits:
-            gross += weights[i]
-            turn += weights[i] / 2.0
-            base[i] = 0.0
+        # v1.1（P1-7）修复双重计费：调仓日 sel 已排除 sl_exits、base[sl]=0，gross=Σ|Δ| 已含止损退出量，
+        # 不再重复累加（原实现在 433-436 行对 gross/turn 二次累加，多扣成本+挤占换手预算）；
+        # 非调仓日（纯止损日）base=weights 拷贝，须在此置 0 并计入换手/成本。
+        if not rebal:
+            for i in sl_exits:
+                gross += weights[i]
+                turn += weights[i] / 2.0
+                base[i] = 0.0
 
         # ---- 风控缩放 ----
         # 波动率"仓位上限"是持仓目标约束，逐日/止损日套用会因分位抖动反复加减仓（实测产生 5% 级抖仓）。
@@ -452,20 +471,25 @@ def backtest(panel, fac, start=START):
         if turn > 1e-9:
             exec_trades = []
             cost_yuan_add = 0.0
+            nav_val = nav[t] * INIT_CAPITAL     # 决策日账户总值（元）
             for i in range(n_ind):
                 d = base[i] - weights[i]
                 if abs(d) > 1e-9:
                     action = "买入" if d > 0 else "卖出"
                     fill_px = float(P[i, t])
-                    fill = fill_px * (1 + COST_PER_SIDE) if d > 0 else fill_px * (1 - COST_PER_SIDE)
+                    # v1.1（P1-14）成本模型真实口径：滑点 5bp 计入成交价；佣金 max(万1, 5元/笔) 单列费用
+                    fill = fill_px * (1 + SLIP_BPS / 10000.0) if d > 0 else fill_px * (1 - SLIP_BPS / 10000.0)
+                    amt = abs(d) * nav_val
+                    cost_i = max(amt * COMM_RATE, COMM_MIN) + amt * SLIP_BPS / 10000.0
                     exec_trades.append({
                         "_i": i, "industry": panel["inds"][i], "action": action,
                         "w": round(float(d), 6), "fill_px": round(fill, 4),
                         "reason": "止损" if i in sl_exits else (reason or "风控调整"),
                         "score": round(float(score[i, t]), 3) if not np.isnan(score[i, t]) else None,
                     })
-                    cost_yuan_add += abs(d) * COST_PER_SIDE * nav[t] * INIT_CAPITAL
-            pending = (base, gross * COST_PER_SIDE, exec_trades, cost_yuan_add)
+                    cost_yuan_add += cost_i
+            exec_cost = cost_yuan_add / nav_val if nav_val > 1e-12 else 0.0
+            pending = (base, exec_cost, exec_trades, cost_yuan_add)
             month_budget = max(0.0, month_budget - turn)
             if rebal:
                 scale = desired_scale   # 调仓挂单执行后实际暴露即目标系数
@@ -486,14 +510,15 @@ def backtest(panel, fac, start=START):
     dd = nav / np.maximum.accumulate(nav) - 1
     csi_dd = csi_nav / np.maximum.accumulate(csi_nav) - 1
     ew_dd = ew_nav / np.maximum.accumulate(ew_nav) - 1
-    metrics = compute_metrics(nav, csi_nav, ew_nav, port_ret, dates, trades, start_i, cost_yuan)
+    metrics = compute_metrics(nav, csi_nav, ew_nav, port_ret, dates, trades, start_i, cost_yuan,
+                              avg_exp=float(np.mean([h["weights"].sum() for h in holdings_history])) if holdings_history else 0.0)
     return {"nav": nav, "csi_nav": csi_nav, "ew_nav": ew_nav, "dd": dd, "csi_dd": csi_dd,
             "ew_dd": ew_dd, "dates": dates, "trades": trades, "metrics": metrics,
             "port_ret": port_ret, "exc20_hist": exc20_hist,
             "holdings_history": holdings_history, "cost_yuan": cost_yuan}
 
 
-def compute_metrics(nav, csi_nav, ew_nav, port_ret, dates, trades, start_i, cost_yuan):
+def compute_metrics(nav, csi_nav, ew_nav, port_ret, dates, trades, start_i, cost_yuan, avg_exp=1.0):
     seg = slice(start_i, len(nav))
     nav_s = nav[seg]
     if len(nav_s) < 2 or nav_s[-1] <= 0:
@@ -509,13 +534,48 @@ def compute_metrics(nav, csi_nav, ew_nav, port_ret, dates, trades, start_i, cost
     s = pd.Series(nav_s, index=dates[seg])
     m = s.resample("ME").last().pct_change().dropna()
     mw = float((m > 0).mean()) if len(m) else 0.0
+    # v1.1（P1-12）：annual 以上一年末净值为基准（原 g.iloc[0] 是当年首日、已含当日收益，
+    # 导致年度连乘与总收益缺口 17.10pp）；断言用未取整值，年度连乘 == 总收益。
     yr = {}
+    yr_exact = {}
+    prev = float(nav_s[0])
     for y, g in s.groupby(s.index.year):
         if len(g) > 1:
-            yr[str(y)] = round(float(g.iloc[-1] / g.iloc[0] - 1), 4)
+            yr_exact[str(y)] = g.iloc[-1] / prev - 1
+            yr[str(y)] = round(float(yr_exact[str(y)]), 4)
+            prev = float(g.iloc[-1])
+    if yr_exact:
+        prod = 1.0
+        for v in yr_exact.values():
+            prod *= (1 + v)
+        assert abs(prod - 1 - total) < 1e-6, f"年度连乘 {prod-1:.6f} != 总收益 {total:.6f}"
     total_gross = sum(abs(t["w"]) for t in trades)      # 双边绝对额（Σ|Δ|）
     total_turn = total_gross / 2.0                       # 单边换手（与方案"≤100%"同口径）
-    cost_pct = total_gross * COST_PER_SIDE               # 成本占比（每边各 6bp）
+    # v1.1（P1-14）：成本占比改真实口径（滑点+佣金逐笔累计 cost_yuan，占期末账户比例）
+    cost_pct = cost_yuan / (INIT_CAPITAL * nav_s[-1]) if nav_s[-1] > 0 else 0.0
+
+    # v1.1（P1-11）：基准同口径指标——夏普 / 信息比率 / 回撤 / 同暴露折算总收益
+    def _bench(bnav):
+        b = bnav[seg]
+        if len(b) < 2 or b[-1] <= 0:
+            return {"sharpe": None, "total": None, "mdd": None, "ir": None}
+        bret = b[1:] / b[:-1] - 1
+        bsd = bret.std(ddof=0)
+        bsh = (bret.mean() / bsd * math.sqrt(TRADING_DAYS)) if bsd > 1e-12 else 0.0
+        bmdd = float((b / np.maximum.accumulate(b) - 1).min())
+        btotal = b[-1] / b[0] - 1
+        ex = rets[1:] - bret
+        exsd = ex.std(ddof=0)
+        ir = (ex.mean() / exsd * math.sqrt(TRADING_DAYS)) if exsd > 1e-12 else 0.0
+        return {"sharpe": round(float(bsh), 3), "total": round(float(btotal), 4),
+                "mdd": round(float(bmdd), 4), "ir": round(float(ir), 3)}
+    csi_b = _bench(csi_nav)
+    ew_b = _bench(ew_nav)
+    avg_exp = float(avg_exp)
+    # 同暴露折算：策略平均暴露 63% 与 100% 暴露基准直接比总收益不公平 → 按暴露指数折算
+    adj = (lambda v: (1 + v) ** avg_exp - 1 if v is not None else None)
+    csi_adj = adj(csi_b["total"]) if csi_b["total"] is not None else None
+    ew_adj = adj(ew_b["total"]) if ew_b["total"] is not None else None
     return {
         "start": str(dates[seg][0].date()), "end": str(dates[seg][-1].date()),
         "total": round(float(total), 4), "cagr": round(float(cagr), 4),
@@ -525,11 +585,13 @@ def compute_metrics(nav, csi_nav, ew_nav, port_ret, dates, trades, start_i, cost
         "avg_annual_turn": round(float(total_turn / years), 3) if years > 0 else 0.0,
         "cost_pct": round(float(cost_pct), 4), "cost_yuan": round(float(cost_yuan), 0),
         "years": round(float(years), 2), "annual": yr,
-        "csi_total": round(float(csi_nav[seg][-1] / csi_nav[seg][0] - 1), 4),
-        "ew_total": round(float(ew_nav[seg][-1] / ew_nav[seg][0] - 1), 4),
-        "csi_sharpe": None,
-        "csi_mdd": round(float((csi_nav[seg] / np.maximum.accumulate(csi_nav[seg]) - 1).min()), 4),
-        "ew_mdd": round(float((ew_nav[seg] / np.maximum.accumulate(ew_nav[seg]) - 1).min()), 4),
+        "csi_total": csi_b["total"], "ew_total": ew_b["total"],
+        "csi_sharpe": csi_b["sharpe"], "ew_sharpe": ew_b["sharpe"],
+        "csi_ir": csi_b["ir"], "ew_ir": ew_b["ir"],
+        "csi_adj_total": round(float(csi_adj), 4) if csi_adj is not None else None,
+        "ew_adj_total": round(float(ew_adj), 4) if ew_adj is not None else None,
+        "avg_exposure": round(float(avg_exp), 3),
+        "csi_mdd": csi_b["mdd"], "ew_mdd": ew_b["mdd"],
     }
 
 
@@ -552,13 +614,16 @@ def snapshot(panel, fac, bt):
     rank20 = {i: r for r, i in enumerate(order20)}
     rankings = []
     for i in order:
+        vol_pct = fac["vol_pct"][i, t]
         rankings.append({
             "ind": inds[i], "rank": rank_map[i] + 1,
             "score": round(float(s[i]), 3),
             "mom": round(float(fac["mom_z"][i, t]), 2) if not np.isnan(fac["mom_z"][i, t]) else None,
             "mom_raw": round(float(fac["mom_raw"][i, t]), 4) if not np.isnan(fac["mom_raw"][i, t]) else None,
             "vol": round(float(fac["vol20"][i, t]), 2) if not np.isnan(fac["vol20"][i, t]) else None,
-            "vol_mult": round(float(fac["vol_pct"][i, t]), 2) if not np.isnan(fac["vol_pct"][i, t]) else None,
+            # v1.1（P2-9）：vol_pct 为真实分位；vol_mult 为实际乘数（原实现把分位误标成乘数）
+            "vol_pct": round(float(vol_pct), 2) if not np.isnan(vol_pct) else None,
+            "vol_mult": round(0.7 if not np.isnan(vol_pct) and vol_pct >= 0.70 else 1.0, 2),
             "crowd": round(float(fac["crowd_pct"][i, t]), 2) if not np.isnan(fac["crowd_pct"][i, t]) else None,
             "rev": round(float(fac["rev_bonus"][i, t]), 2) if not np.isnan(fac["rev_bonus"][i, t]) else None,
             "rank_chg": int(rank_map[i] - rank20.get(i, rank_map[i])),
@@ -577,11 +642,15 @@ def snapshot(panel, fac, bt):
         "holdings": holdings,
         "risk": {"cb": bool(hh["cb"]), "exc20": round(exc20, 3) if exc20 is not None else None,
                  "mk_pct": hh.get("mk_pct"), "mk_cap": hh.get("mk_scale"),
-                 "scale": round(float(w.sum()), 2)},
+                 "scale": round(float(w.sum()), 2),
+                 # v1.1（P2-1/P2-2）：末日挂单悬空显式披露——决策日=T+1 执行，末日无 T+1 可执行；
+                 # pending_rebalance=挂单目标暴露（None 表示无挂单）
+                 "pending_rebalance": round(float(hh["tgt"]), 2) if hh.get("tgt") is not None else None},
         "params": {"top_n": TOP_N, "swap_gap": SWAP_GAP, "stay_pct": STAY_PCT,
                    "accel_rank": ACCEL_RANK, "accel_gap": ACCEL_GAP,
-                   "cost_per_side": COST_PER_SIDE, "sl_stop": SL_STOP,
-                   "cb_excess_dd": CB_EXCESS_DD, "cb_exposure": CB_EXPOSURE,
+                   "slip_bps": SLIP_BPS, "comm_rate": COMM_RATE, "comm_min": COMM_MIN,
+                   "sl_stop": SL_STOP, "cb_excess_dd": CB_EXCESS_DD, "cb_lookback": CB_LOOKBACK,
+                   "cb_exposure": CB_EXPOSURE,
                    "mk_cap80": MK_CAP80, "mk_cap90": MK_CAP90, "turnover_cap": TURNOVER_CAP},
         "metrics": m,
     }
