@@ -6,6 +6,8 @@
 2) Walk-forward：固定参数在 3 个不相交子区间上报告，检查跨区间一致性（不在测试段上调参）
 3) 随机选股对照：RAND_N 次随机得分回测（同日程/门槛/留仓/换手/风控，仅因子替换随机数），
    报告真实夏普在随机分布中的分位与 p 值（单侧：P(随机 ≥ 真实)）
+4) 邻域微扰（策略层审计 S-1）：对行业日收益加 σ=0.005~0.20 高斯噪声、每档多 seed，
+   报告总收益/夏普/回撤 P5/中位数/P95——考察结果对输入微扰的稳定性
 输出: data/sector-sensitivity.json（固定 seed 42，确定性可复现）
 用法: python3 sector_sensitivity.py [--raw data/sector-week-....json.gz] [--quick]
 """
@@ -50,7 +52,8 @@ def load_panel():
 
 def run_metrics(panel, fac, start=E.START, end=None):
     m = E.backtest(panel, fac, start=start, end=end)["metrics"]
-    return {k: (round(m[k], 4) if isinstance(m[k], float) else m[k])
+    # compute_metrics 在 NAV≤0（如极端噪声致净值归零）时返回 {}，此时如实标 None 而非崩溃
+    return {k: (round(m[k], 4) if m.get(k) is not None else None)
             for k in ("total", "sharpe", "mdd", "n_trades")}
 
 
@@ -107,6 +110,39 @@ def main():
     }
     print(f"  随机对照 n={RAND_N}: 随机夏普 mean {sharpes.mean():.3f} / p95 {np.percentile(sharpes,95):.3f} / max {sharpes.max():.3f}；"
           f"真实 {real:.3f} 分位 {pct:.1%} p={1-pct:.3f}")
+    # 邻域微扰（策略层审计 S-1）：对原始行业日收益加高斯噪声，考察结果对输入微扰的稳定性。
+    # 与随机对照的区别：随机对照替换整张得分表（因子完全失效），邻域仅扰动输入收益
+    # （因子信息仍在，只是被噪声稀释）——直接回应"结果对微扰脆弱"指控。
+    # σ=0.005~0.20 每档多 seed，报告总收益/夏普/回撤的 P5/中位数/P95。
+    R0 = panel["R"].copy()
+    n_seed = 3 if quick else 5
+    sigmas = [0.005, 0.01, 0.02, 0.05, 0.10, 0.20]
+    neigh = []
+    for sig in sigmas:
+        totals, sharpes, mdds = [], [], []
+        for k in range(n_seed):
+            rng = np.random.default_rng(RNG_SEED * 1000 + int(round(sig * 10000)) + k)
+            panel["R"] = R0 + rng.normal(0.0, sig, R0.shape)
+            m = E.backtest(panel, fac)["metrics"]
+            totals.append(m.get("total")); sharpes.append(m.get("sharpe")); mdds.append(m.get("mdd"))
+        panel["R"] = R0
+
+        def stat(a):
+            v = [x for x in a if x is not None]
+            if not v:
+                return None
+            return {"p5": round(float(np.percentile(v, 5)), 4),
+                    "p50": round(float(np.median(v)), 4),
+                    "p95": round(float(np.percentile(v, 95)), 4)}
+        neigh.append({"sigma": sig, "n_seed": n_seed,
+                      "total": stat(totals), "sharpe": stat(sharpes), "mdd": stat(mdds)})
+        tv = [x for x in totals if x is not None]
+        if tv:
+            print(f"  邻域 σ={sig}: 收益中位 {np.median(tv)*100:+.1f}% (P5..P95 "
+                  f"{np.percentile(tv,5)*100:+.1f}..{np.percentile(tv,95)*100:+.1f}%)")
+        else:
+            print(f"  邻域 σ={sig}: 全部 seed 净值归零，metrics=None")
+    out["neighborhood"] = neigh
     out["cleaned_bars"] = len(removed)
     path = os.path.join(BASE, "data", "sector-sensitivity.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)

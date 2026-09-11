@@ -1,0 +1,168 @@
+{
+ "baseline": {
+  "total": 1.0438,
+  "sharpe": 0.4823,
+  "mdd": -0.3691,
+  "n_trades": 41.0
+ },
+ "sensitivity": [
+  {
+   "param": "X_UP",
+   "value": 10,
+   "total": 0.6635,
+   "sharpe": 0.3757,
+   "mdd": -0.3825,
+   "n_trades": 48.0
+  },
+  {
+   "param": "X_UP",
+   "value": 20,
+   "total": 0.9399,
+   "sharpe": 0.4414,
+   "mdd": -0.4628,
+   "n_trades": 33.0
+  },
+  {
+   "param": "X_UP",
+   "value": 25,
+   "total": 0.9519,
+   "sharpe": 0.4445,
+   "mdd": -0.4628,
+   "n_trades": 33.0
+  },
+  {
+   "param": "X_UP",
+   "value": 35,
+   "total": 0.8969,
+   "sharpe": 0.4234,
+   "mdd": -0.4623,
+   "n_trades": 29.0
+  },
+  {
+   "param": "Y_DOWN",
+   "value": 8,
+   "total": 0.9814,
+   "sharpe": 0.4605,
+   "mdd": -0.4056,
+   "n_trades": 50.0
+  },
+  {
+   "param": "Y_DOWN",
+   "value": 10,
+   "total": 1.0552,
+   "sharpe": 0.4832,
+   "mdd": -0.3695,
+   "n_trades": 45.0
+  },
+  {
+   "param": "Y_DOWN",
+   "value": 12,
+   "total": 1.0546,
+   "sharpe": 0.4843,
+   "mdd": -0.3693,
+   "n_trades": 43.0
+  },
+  {
+   "param": "Y_DOWN",
+   "value": 16,
+   "total": 1.024,
+   "sharpe": 0.4789,
+   "mdd": -0.3683,
+   "n_trades": 40.0
+  },
+  {
+   "param": "Y_DOWN",
+   "value": 20,
+   "total": 0.9999,
+   "sharpe": 0.4737,
+   "mdd": -0.3676,
+   "n_trades": 38.0
+  },
+  {
+   "param": "HOLD_DAYS",
+   "value": 60,
+   "total": 0.9706,
+   "sharpe": 0.468,
+   "mdd": -0.3873,
+   "n_trades": 54.0
+  },
+  {
+   "param": "HOLD_DAYS",
+   "value": 90,
+   "total": 0.9817,
+   "sharpe": 0.4751,
+   "mdd": -0.3599,
+   "n_trades": 46.0
+  },
+  {
+   "param": "HOLD_DAYS",
+   "value": 150,
+   "total": 1.0567,
+   "sharpe": 0.4852,
+   "mdd": -0.3691,
+   "n_trades": 40.0
+  },
+  {
+   "param": "REBUY_DAYS",
+   "value": 20,
+   "total": 0.5637,
+   "sharpe": 0.3288,
+   "mdd": -0.4434,
+   "n_trades": 47.0
+  },
+  {
+   "param": "REBUY_DAYS",
+   "value": 45,
+   "total": 0.4327,
+   "sharpe": 0.2862,
+   "mdd": -0.4171,
+   "n_trades": 43.0
+  },
+  {
+   "param": "REBUY_DAYS",
+   "value": 150,
+   "total": 0.8387,
+   "sharpe": 0.4345,
+   "mdd": -0.3181,
+   "n_trades": 40.0
+  },
+  {
+   "param": "REBUY_DAYS",
+   "value": 250,
+   "total": 0.4558,
+   "sharpe": 0.3051,
+   "mdd": -0.323,
+   "n_trades": 38.0
+  }
+ ],
+ "walk_forward": [
+  {
+   "period": "2018-2020",
+   "start": "2018-01-01",
+   "end": "2020-12-31",
+   "total": 0.2512,
+   "sharpe": 0.493,
+   "mdd": -0.3182,
+   "n_trades": 13.0
+  },
+  {
+   "period": "2021-2023",
+   "start": "2021-01-01",
+   "end": "2023-12-29",
+   "total": -0.2293,
+   "sharpe": -0.3865,
+   "mdd": -0.323,
+   "n_trades": 18.0
+  },
+  {
+   "period": "2024-2026",
+   "start": "2024-01-01",
+   "end": "2026-09-10",
+   "total": 0.727,
+   "sharpe": 1.1205,
+   "mdd": -0.157,
+   "n_trades": 13.0
+  }
+ ],
+ "note": "固定参数现算；口径与审计 H-4/H-9 一致（X_UP/Y_DOWN/HOLD_DAYS/REBUY_DAYS 扫描值直接引用审计报告）"
+}

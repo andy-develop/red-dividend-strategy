@@ -37,6 +37,42 @@ WEEK_J0 = False             # 实验否决：周线共振门（wj<0 才允许超
 VAL_WIN = 3                 # 剪刀差滚动分位窗口（年；2y/3y/5y/expanding 实测：3y 收益-回撤平衡且无冷启动问题；5y 冷启动致2016-19段差）
 CN10Y_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cn10y_daily.csv")
 MAX_POS = 1.50
+# H-1 修复（策略层审计）：交易日历（仓库根 trade_calendar.csv，2013-2026）用于判定
+# "未完成 ISO 周"——df 末日之后若仍有交易日落在同一 ISO 周，则该周未完成。
+_CAL_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "trade_calendar.csv")
+_cal_sorted = None
+
+def _load_cal():
+    """加载并缓存交易日历（升序 date 列表）；缺失/异常返回空列表。"""
+    global _cal_sorted
+    if _cal_sorted is None:
+        try:
+            if os.path.exists(_CAL_CSV):
+                _cal_sorted = sorted(pd.read_csv(_CAL_CSV, parse_dates=["date"])["date"].dt.date.tolist())
+            else:
+                _cal_sorted = []
+        except Exception:
+            _cal_sorted = []
+    return _cal_sorted
+
+def _week_completed(last_day):
+    """last_day 所在 ISO 周是否已完整（该周无未到的交易日）。
+    有日历时：last_day 之后最近交易日若仍属同一 ISO 周 → 未完成；
+    无日历降级：周五（weekday=4）视为完成（该周无未来交易日）。"""
+    cal = _load_cal()
+    if not cal:
+        return last_day.weekday() >= 4
+    lo, hi = 0, len(cal)
+    while lo < hi:                 # bisect 右边界：第一个 > last_day 的交易日
+        mid = (lo + hi) // 2
+        if cal[mid] <= last_day:
+            lo = mid + 1
+        else:
+            hi = mid
+    if lo >= len(cal):
+        return True                # last_day 之后无交易日 → 本周已完成
+    nxt = cal[lo]
+    return nxt.isocalendar()[:2] != last_day.isocalendar()[:2]
 START = "2016-09-08"
 LOOKBACK_DAYS = 4800      # 抓取回看（update.py 用；需覆盖 2014 起指标 warm-up）
 SLIPPAGE_BPS = 5          # 单边滑点 5bp = 0.05%
@@ -97,6 +133,13 @@ def build_signals(df, use_tr=False, p=None):
     iso = df["date"].dt.isocalendar()
     wk_key = iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
     wk = df.groupby(wk_key).agg(close=(c.name, "last"), date=("date", "last")).reset_index(drop=True)
+    # H-1 修复（策略层审计）：实盘/回测周线口径一致化——剔除"未完成 ISO 周"。
+    # 回测中 df 末日=周五（完整周），实盘每日运行时末日=今天（未完成周），
+    # 若保留最后一行，map 会命中"用不完整周算出的 J"，与回测（ffill 上一周）口径不一致。
+    # 判定：df 末日之后若仍有交易日落在同一 ISO 周 → 未完成，剔除（用交易日历；无日历降级周五判断）。
+    # 对回测无影响：完整历史末日=周五，不触发剔除。
+    if len(wk) >= 2 and not _week_completed(df["date"].iloc[-1].date()):
+        wk = wk.iloc[:-1]
     low9 = wk["close"].rolling(9).min()
     high9 = wk["close"].rolling(9).max()
     rsv = ((wk["close"] - low9) / (high9 - low9) * 100).fillna(50.0)
@@ -222,18 +265,22 @@ def replay(df, t1=True, start=START, delay_sell=DELAY_SELL, p=None):
         else:
             osig = bool(r["oversold"]); obsig = bool(r["overbought"]); lost = bool(r["momentum_lost"])
         act = None
+        # H-6 修复（策略层审计）：仓位档位由 P.MAX_POS 派生，消除硬编码——
+        # 原 1.25/1.5/1.0 为字面量，MAX_POS 是无人引用的死参数（MAX_POS=1.0 无法关闭杠杆且静默失效）。
+        c_pos = min(1.25, P.MAX_POS)          # C 档（A→C / B→C 回补）
+        d_pos = min(1.50, P.MAX_POS)          # D 档（C→D 二次加仓）
         if state == "A":
-            if osig: act = ("buy", 1.25, "C", "情绪极值超卖共振·加仓至125%")
+            if osig: act = ("buy", c_pos, "C", "情绪极值超卖共振·加仓至125%")
             elif obsig: act = ("sell", 0.0, "B", "超买极值共振·清仓离场")
         elif state == "B":
-            if osig: act = ("buy", 1.25, "C", "离场中现超卖共振·回补并加仓至125%")
+            if osig: act = ("buy", c_pos, "C", "离场中现超卖共振·回补并加仓至125%")
             elif t0 is not None and d >= t0 + datetime.timedelta(days=P.REBUY_DAYS):
                 act = ("buy", 1.0, "A", "离场满90自然日·强制回补至100%")
         elif state in ("C", "D"):
             # v7.11 估值"半力"：分位 50-80% 时禁止第二档加仓至 150%
             half = P.VAL_GATE and prev is not None and bool(prev["os_half"])
-            if state == "C" and osig and pos < 1.5 and not half:
-                act = ("buy", 1.5, "D", "再次超卖共振·加仓至150%")
+            if state == "C" and osig and pos < P.MAX_POS - 1e-9 and not half:
+                act = ("buy", d_pos, "D", "再次超卖共振·加仓至150%")
             lost_now = prev is not None and bool(prev["momentum_lost"])
             if lost_now and pend is None:
                 pend = [i - 1, d]          # 记录确认日 T（prev 行索引 i-1）

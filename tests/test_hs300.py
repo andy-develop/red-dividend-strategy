@@ -9,7 +9,7 @@
 6. hs300_update 参数定义正确。
 运行：python3 -m unittest tests.test_hs300 -v
 """
-import os, sys, unittest
+import os, sys, unittest, datetime
 import numpy as np
 import pandas as pd
 
@@ -59,6 +59,32 @@ class TestParametrizedSignals(unittest.TestCase):
         cls.df_dft = E.build_signals(cls.df.copy())
         cls.df_exp = E.build_signals(cls.df.copy(), p=E.make_params())
         cls.df_hs = E.build_signals(cls.df.copy(), p=E.make_params(X_UP=15.0, Y_DOWN=20.0, HOLD_DAYS=120))
+
+    def test_h1_week_completed(self):
+        # 策略层审计 H-1：未完成 ISO 周剔除判定（交易日历二分）
+        self.assertTrue(E._week_completed(datetime.date(2022, 5, 27)))    # 周五，下周交易日 5-30 → 本周完整
+        self.assertFalse(E._week_completed(datetime.date(2022, 5, 25)))   # 周三，5-26/27 仍在同一 ISO 周 → 未完成
+
+    def test_h1_build_signals_drops_incomplete_week(self):
+        # 实盘每日运行（末日=今天，未完成周）应剔除末日所在周，wj 回填上一完整周。
+        # 合成 12 交易日（2 周完整 + 周一/周二），末日=周二属未完成周（日历/降级均判未完成）。
+        n = 12
+        px = 3000.0 * (1.002 ** np.arange(n))
+        df = pd.DataFrame({"date": pd.bdate_range("2022-05-02", periods=n),
+                           "px": px, "close": px, "vol": np.full(n, 1e9), "tr": px})
+        sig = E.build_signals(df.copy())
+        sig_b = E.build_signals(df.iloc[:10].copy())   # 完整 2 周（末日 05-13 周五）
+        self.assertEqual(sig["wj"].iloc[-1], sig_b["wj"].iloc[-1])   # 末日 wj = 上周 J（剔除生效）
+
+    def test_h6_max_pos_caps_leverage(self):
+        # 策略层审计 H-6：MAX_POS 派生仓位档位——1.0 关闭杠杆，1.5 允许加仓
+        df = E.build_signals(E.get_prices(TR, PX))
+        P0 = E.make_params(X_UP=15.0, Y_DOWN=14.0, HOLD_DAYS=120, MAX_POS=1.0)
+        P1 = E.make_params(X_UP=15.0, Y_DOWN=14.0, HOLD_DAYS=120, MAX_POS=1.5)
+        _, _, pos0, *_ = E.replay(df, p=P0)
+        _, _, pos1, *_ = E.replay(df, p=P1)
+        self.assertLessEqual(pos0.max(), 1.0 + 1e-9)          # 杠杆关闭：任何时点 ≤100%
+        self.assertGreaterEqual(pos1.max(), pos0.max())       # 1.5 档不劣于 1.0 档（且可达杠杆位）
 
     def test_explicit_default_identical_to_none(self):
         # p=None 与 p=make_params() 逐列一致（参数化对默认路径零回归）
@@ -120,7 +146,8 @@ class TestHs300Update(unittest.TestCase):
     def test_hs300_params_definition(self):
         import hs300_update
         self.assertEqual(hs300_update.P.X_UP, 15.0)
-        self.assertEqual(hs300_update.P.Y_DOWN, 20.0)
+        # v8.1（策略层审计 H-4）：Y_DOWN 20→14——20% 阈值在沪深300 全样本仅触发 3 天（2018 年 0 天），被数据禁用
+        self.assertEqual(hs300_update.P.Y_DOWN, 14.0)
         self.assertEqual(hs300_update.P.HOLD_DAYS, 120)
         self.assertEqual(hs300_update.START, E.START)   # 与红利低波同窗口
 

@@ -122,6 +122,22 @@ class TestSelect(unittest.TestCase):
         self.assertNotIn(1, sel)   # 未达 15% 优势，不换
         self.assertIn(2, sel)      # 达 15% 优势，换入
 
+    def test_swap_gap_parameter_binds(self):
+        # 策略层审计 S-3 回归：门槛参数必须真正参与槽位判定——
+        # 审计实测旧实现 SWAP_GAP 0.0~0.30 输出逐位相同（持仓被无条件保留到槽满，门槛从未被检查）。
+        score, pooled, cur = self._mk([1.0, 1.1, 1.3, 0.5, 0.4, 0.3], [0])
+        orig = E.SWAP_GAP
+        try:
+            E.SWAP_GAP = 0.0
+            sel0 = sorted(E.select_target(0, cur, score, pooled))
+            E.SWAP_GAP = 1.0
+            sel1 = sorted(E.select_target(0, cur, score, pooled))
+        finally:
+            E.SWAP_GAP = orig
+        self.assertIn(2, sel0)        # 门槛 0：1.3 ≥ 1.0 换入
+        self.assertEqual(sel1, [0])   # 门槛 1.0：1.3 < 2.0 全部拒绝，宁缺毋滥
+        self.assertNotEqual(sel0, sel1)
+
     def test_weak_entrant_leaves_slot_unfilled(self):
         # 持仓 {0}（score 1.0），候选都达不到 1.15 门槛 → 宁缺毋滥，不多持
         score, pooled, cur = self._mk([1.0, 1.1, 1.05, 1.02, 0.9, 0.8], [0])
@@ -345,6 +361,8 @@ class TestBacktest(unittest.TestCase):
         # 回归：调仓日即使 scale 数值未变，新目标权重也必须乘以生效仓位系数；
         # 旧逻辑只在 scale 变化时应用，导致波动率仓位上限在调仓日静默失效、满仓运行。
         # 断言对象为当日目标暴露（tgt）——实际持仓因 T+1 执行天然滞后一天。
+        # v1.2：波动率上限是"调仓日目标约束"（止损日/熔断切换日不逐日套用，避免分位抖动抖仓），
+        # tgt ≤ cap 断言仅对调仓日成立；止损日 tgt=止损后实际暴露，由第一条 ≤100% 覆盖。
         raw = make_raw(six_ind(), csi_mode="spike", seed=9)
         panel = E.build_panel(raw)
         fac = E.compute_factors(panel)
@@ -352,7 +370,7 @@ class TestBacktest(unittest.TestCase):
         for h in bt["holdings_history"]:
             expo = float(np.sum(h["weights"]))
             self.assertLessEqual(expo, 1.0 + 1e-9, f"{h['date']}: 实际暴露 {expo:.3f} > 100%")
-            if h["tgt"] is not None:
+            if h["tgt"] is not None and h.get("rebal"):
                 cap = (E.CB_EXPOSURE if h["cb"] else h["mk_scale"]) + 1e-9
                 self.assertLessEqual(h["tgt"], cap,
                                      f"{h['date']}: 目标暴露 {h['tgt']:.3f} 超过上限 {cap:.3f}")

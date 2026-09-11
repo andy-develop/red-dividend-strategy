@@ -1,7 +1,7 @@
 {
  "baseline": {
-  "total": 1.04,
-  "sharpe": 0.564,
+  "total": 1.0211,
+  "sharpe": 0.558,
   "mdd": -0.3565,
   "n_trades": 499
  },
@@ -9,128 +9,128 @@
   {
    "param": "TOP_N",
    "value": 3,
-   "total": 1.9501,
-   "sharpe": 0.73,
-   "mdd": -0.3573,
-   "n_trades": 362
+   "total": 1.7615,
+   "sharpe": 0.698,
+   "mdd": -0.3574,
+   "n_trades": 373
   },
   {
    "param": "TOP_N",
    "value": 5,
-   "total": 0.8835,
-   "sharpe": 0.528,
+   "total": 0.8655,
+   "sharpe": 0.522,
    "mdd": -0.3967,
-   "n_trades": 661
+   "n_trades": 666
   },
   {
    "param": "SWAP_GAP",
    "value": 0.1,
-   "total": 1.04,
-   "sharpe": 0.564,
+   "total": 1.0211,
+   "sharpe": 0.558,
    "mdd": -0.3565,
    "n_trades": 499
   },
   {
    "param": "SWAP_GAP",
    "value": 0.2,
-   "total": 1.005,
-   "sharpe": 0.553,
+   "total": 0.9987,
+   "sharpe": 0.552,
    "mdd": -0.3565,
-   "n_trades": 496
+   "n_trades": 494
   },
   {
    "param": "STAY_PCT",
    "value": 0.5,
-   "total": 2.0181,
-   "sharpe": 0.779,
-   "mdd": -0.3062,
-   "n_trades": 528
+   "total": 1.6776,
+   "sharpe": 0.722,
+   "mdd": -0.2805,
+   "n_trades": 524
   },
   {
    "param": "STAY_PCT",
    "value": 0.7,
-   "total": 0.7014,
-   "sharpe": 0.456,
+   "total": 0.6895,
+   "sharpe": 0.452,
    "mdd": -0.3585,
-   "n_trades": 496
+   "n_trades": 501
   },
   {
    "param": "CB_EXCESS_DD",
    "value": 0.05,
-   "total": 1.0964,
-   "sharpe": 0.584,
+   "total": 1.111,
+   "sharpe": 0.589,
    "mdd": -0.3612,
-   "n_trades": 520
+   "n_trades": 516
   },
   {
    "param": "CB_EXCESS_DD",
    "value": 0.12,
-   "total": 1.4634,
-   "sharpe": 0.631,
-   "mdd": -0.3015,
-   "n_trades": 405
+   "total": 1.1713,
+   "sharpe": 0.561,
+   "mdd": -0.4024,
+   "n_trades": 420
   },
   {
    "param": "SL_STOP",
    "value": 0.08,
-   "total": 0.4534,
-   "sharpe": 0.367,
+   "total": 0.4399,
+   "sharpe": 0.361,
    "mdd": -0.4278,
    "n_trades": 467
   },
   {
    "param": "SL_STOP",
    "value": 0.16,
-   "total": 0.8954,
-   "sharpe": 0.503,
-   "mdd": -0.4543,
-   "n_trades": 514
+   "total": 1.278,
+   "sharpe": 0.604,
+   "mdd": -0.4535,
+   "n_trades": 509
   },
   {
    "param": "MK_CAP80",
    "value": 0.6,
-   "total": 1.0374,
-   "sharpe": 0.564,
+   "total": 1.0185,
+   "sharpe": 0.558,
    "mdd": -0.3565,
    "n_trades": 501
   },
   {
    "param": "MK_CAP80",
    "value": 0.8,
-   "total": 1.002,
-   "sharpe": 0.553,
+   "total": 0.9834,
+   "sharpe": 0.547,
    "mdd": -0.3565,
    "n_trades": 507
   },
   {
    "param": "MK_CAP90",
    "value": 0.4,
-   "total": 0.9689,
-   "sharpe": 0.547,
+   "total": 0.9543,
+   "sharpe": 0.542,
    "mdd": -0.3514,
    "n_trades": 517
   },
   {
    "param": "MK_CAP90",
    "value": 0.6,
-   "total": 0.7822,
-   "sharpe": 0.481,
+   "total": 0.7623,
+   "sharpe": 0.474,
    "mdd": -0.3473,
    "n_trades": 540
   },
   {
    "param": "SLIP_BPS",
    "value": 2,
-   "total": 1.0864,
-   "sharpe": 0.564,
+   "total": 1.067,
+   "sharpe": 0.558,
    "mdd": -0.3535,
    "n_trades": 499
   },
   {
    "param": "SLIP_BPS",
    "value": 10,
-   "total": 1.0254,
-   "sharpe": 0.583,
+   "total": 1.0066,
+   "sharpe": 0.577,
    "mdd": -0.349,
    "n_trades": 509
   }
@@ -157,9 +157,9 @@
   {
    "period": "2024-2026",
    "start": "2024-01-01",
-   "end": "2026-09-09",
-   "total": 0.4524,
-   "sharpe": 0.854,
+   "end": "2026-09-10",
+   "total": 0.439,
+   "sharpe": 0.835,
    "mdd": -0.1967,
    "n_trades": 106
   }
@@ -168,16 +168,132 @@
   "n": 150,
   "seed": 42,
   "sharpe": {
-   "mean": 0.389,
-   "p50": 0.381,
-   "p95": 0.714,
-   "max": 0.766
+   "mean": 0.384,
+   "p50": 0.391,
+   "p95": 0.66,
+   "max": 0.958
   },
-  "total_mean": 0.4403,
-  "real_sharpe": 0.564,
-  "percentile": 0.853,
-  "p_value": 0.147
+  "total_mean": 0.4204,
+  "real_sharpe": 0.558,
+  "percentile": 0.867,
+  "p_value": 0.133
  },
  "note": "固定 seed 42；随机对照仅替换得分（同日程/门槛/留仓/换手/风控）；PBO / Deflated Sharpe 未实现（见交付说明披露）",
- "cleaned_bars": 32
+ "neighborhood": [
+  {
+   "sigma": 0.005,
+   "n_seed": 5,
+   "total": {
+    "p5": 0.7597,
+    "p50": 1.0296,
+    "p95": 1.4053
+   },
+   "sharpe": {
+    "p5": 0.4714,
+    "p50": 0.543,
+    "p95": 0.6478
+   },
+   "mdd": {
+    "p5": -0.499,
+    "p50": -0.4132,
+    "p95": -0.3619
+   }
+  },
+  {
+   "sigma": 0.01,
+   "n_seed": 5,
+   "total": {
+    "p5": 0.6331,
+    "p50": 1.3543,
+    "p95": 2.2389
+   },
+   "sharpe": {
+    "p5": 0.4196,
+    "p50": 0.632,
+    "p95": 0.7956
+   },
+   "mdd": {
+    "p5": -0.438,
+    "p50": -0.3925,
+    "p95": -0.2622
+   }
+  },
+  {
+   "sigma": 0.02,
+   "n_seed": 5,
+   "total": {
+    "p5": 0.32,
+    "p50": 1.0244,
+    "p95": 1.5601
+   },
+   "sharpe": {
+    "p5": 0.2898,
+    "p50": 0.514,
+    "p95": 0.6214
+   },
+   "mdd": {
+    "p5": -0.5299,
+    "p50": -0.5015,
+    "p95": -0.4058
+   }
+  },
+  {
+   "sigma": 0.05,
+   "n_seed": 5,
+   "total": {
+    "p5": -0.6005,
+    "p50": 0.4689,
+    "p95": 6.4138
+   },
+   "sharpe": {
+    "p5": -0.325,
+    "p50": 0.325,
+    "p95": 0.8354
+   },
+   "mdd": {
+    "p5": -0.8685,
+    "p50": -0.6688,
+    "p95": -0.465
+   }
+  },
+  {
+   "sigma": 0.1,
+   "n_seed": 5,
+   "total": {
+    "p5": -0.9599,
+    "p50": -0.7639,
+    "p95": 0.1708
+   },
+   "sharpe": {
+    "p5": -0.3646,
+    "p50": 0.007,
+    "p95": 0.3464
+   },
+   "mdd": {
+    "p5": -0.9787,
+    "p50": -0.9088,
+    "p95": -0.7657
+   }
+  },
+  {
+   "sigma": 0.2,
+   "n_seed": 5,
+   "total": {
+    "p5": -0.9936,
+    "p50": -0.9781,
+    "p95": -0.9582
+   },
+   "sharpe": {
+    "p5": 0.0727,
+    "p50": 0.2155,
+    "p95": 0.2989
+   },
+   "mdd": {
+    "p5": -0.9948,
+    "p50": -0.9904,
+    "p95": -0.9813
+   }
+  }
+ ],
+ "cleaned_bars": 2
 }

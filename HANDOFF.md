@@ -565,3 +565,51 @@ create ticket 可用。用户已拍板"发布为新资源"。最终发布机制�
 - **验证**：dry×2 幂等 OK；chrome headless dump-dom：体检卡渲染（88.0 分位 p=0.120）、s-date
   2026-09-10、s-risk/s-kpis/数据质量披露全在。git 140e47d push + CI run 34553077467。
 - **发布**：CI 完成后验证线上（新 URL 若因 HSK 403 重建需告知用户）三端 data_date + content_sha。
+
+## §31 策略层审计整改 v1.2（2026-09-11，行业轮动 S-1~S-8 + 沪深300 H-1~H-10）
+
+**输入**：用户上传《策略层审计报告_行业轮动与沪深300.md》，指令"有则改之，无则加勉"。
+
+### 已修复（实现缺陷，4 引擎文件 + 2 测试）
+- **H-1 周线口径**（backtest/engine.py）：build_signals 剔除"未完成 ISO 周"末日行——
+  实盘每日运行末日=今天（未完成周）命中本周 J，回测 ffill 上一周，97.7% 周中日期信号不同。
+  判定用仓库根 trade_calendar.csv 二分（_load_cal/_week_completed），无日历降级 weekday>=4。
+  对回测零影响（末日信号无次日可成交）。
+- **H-6 MAX_POS 死参数**（engine.py）：replay 仓位档位 1.25/1.5/1.0 字面量 → 派生
+  `c_pos=min(1.25,P.MAX_POS)`、`d_pos=min(1.50,P.MAX_POS)`、C→D 条件 `pos<P.MAX_POS-1e-9`；
+  MAX_POS=1.0 可真正关闭杠杆（测试验证）。
+- **H-4 Y_DOWN 被禁用**（hs300_update.py）：Y_DOWN=20 全样本 63 日跌幅最差仅 −21.6%、
+  2018 年最差 −17.6%（触发 0 天）→ 回 14（v8.1）。实测 +104.4%/0.482 与审计完全一致。
+- **S-3 换仓门槛从未绑定**（sector_engine.py）：旧实现 `if i in held: target.add(i)`
+  无条件保留持仓到槽满，SWAP_GAP 0.0~0.30 逐位相同。重写三段：protected（前 60% 无条件）
+  → entrants（非持仓按得分竞争、须 ≥ min_held+SWAP_GAP）→ weak_held 兜底。
+- **联动修复（S-3 暴露既有缺陷）**：换手超预算时 apply_turnover_cap 以未缩放持仓替换，
+  未换旧持仓保持 1.0 刻度 → 换手受限日 tgt 突破 desired_scale（实测 tgt=0.75 > 上限 0.5）。
+  改为先按 desired_scale 缩放再成对替换（替换 1:1 不改变总暴露）。holdings_history 加 rebal 标记，
+  测试断言 tgt≤cap 仅对调仓日成立（止损日 tgt=止损后实际暴露，由 ≤100% 断言覆盖）。
+
+### 体检/披露（页面如实披露，不改参数）
+- **S-1 邻域统计**（sector_sensitivity.py）：对行业日收益加 σ=0.005~0.20 高斯噪声、每档 5 seed，
+  报告收益/夏普/回撤 P5/中位/P95 → sector-sensitivity.json（正式 n=150，随机对照 p=0.133）。
+- **沪深300 敏感性**（hs300_sensitivity.py 新增）：本地归档（rebuild_hl 不联网）导出 CSV 复用
+  E.run；基线 v8.1 +104.4%/0.48/-36.9%/41 笔（与正式一致）；X_UP/Y_DOWN/HOLD_DAYS/REBUY_DAYS
+  扫描 + WF 三段 → data/hs300-sensitivity.json。Y_DOWN=20 → 100.0%/38 笔、14 → 104.4%/41 笔，
+  与审计（100.0%/38 笔、104.4%/0.482）完全吻合（口径验证）。
+- **页面披露**（index_template.html + sector_update.py disclosure）：
+  S-2 标题改"实测方差占比：主项 99.6%/反转 0.3%"（删"动量50/波动20/拥挤20/反转10"宣称）；
+  S-5 现金收益 1.5%/年→+126.6%、2.5%→+133.6%；H-4 超卖信号 63 日跌幅 ≥20%→≥14% +
+  参数说明改 20→14；H-5 年线门近乎冗余注（仅影响 4 信号、关闭收益略升，估值门有效）；
+  H-9 恒定 125%/150% 杠杆基准并列（+88.8%/0.412/-46.5% 与 +106.5%/0.428/-50.4%，结论支持策略）；
+  H-10 期初无信号建仓 100% 假设 + 起点敏感性 28.8%~117.4%。
+- **明确不做**（审计结论）：S-6 相关性约束（证伪）、S-8 调仓频率（非主变量）、逆波动率
+  （−72.8pp 劣化）、H-2/H-3 熊市减仓路径/基础战术仓位解耦（策略结构再设计，用户未逐项授权，
+  页面已披露年度仓位与指数收益相关系数 −0.684）。
+
+### 验证与产物
+- **测试**：64 passed（新增 S-3 门槛绑定、H-1 周线剔除、H-6 杠杆上限、Y_DOWN 14 断言）。
+- **回测数字**：sector +102.1%/0.56/-35.6%/499 笔（S-3 修复对真实数据无行为变化——门槛路径
+  未触发）；hs300 +104.4%/0.48/-36.9%/41 笔（v8.1）。
+- **产物**：index.html（421KB，三端 payload 齐全）、sector_data.json、hs300_data.json、
+  data/sector-sensitivity.json（含 neighborhood 6 档）、data/hs300-sensitivity.json。
+- **验证**：payload_util.extract 三端 OK（sector data_date=2026-09-10、hs300 state=C pos=125%）；
+  chrome headless dump-dom 渲染 +104.4%/+102.1% 正常；披露关键词全部落盘。

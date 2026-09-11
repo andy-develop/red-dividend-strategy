@@ -231,11 +231,14 @@ def _month_end_flags(dates):
 def select_target(t, cur, score, pooled):
     """Top-N + 换仓门槛（z 分加法）+ 前 60% 留仓观察。返回行业下标列表（模块级，便于单测）。
 
-    统一规则（持仓满/不满均一致）：
-      1. 持仓排名前 60% → 留仓观察（protected），直接保留；
-      2. 其余槽位按得分从高到低填充：持仓行业自动保留（非换仓），非持仓行业须
-         得分 ≥ 当前持仓最低分 + SWAP_GAP（z 分加法；v1.1 修复乘法门槛在负分下方向反转）；
-      3. 无合格新进入者时弱持仓保留——宁可少换，不因微小差距反复换仓。
+    统一规则（v1.2 修复策略层审计 S-3——门槛此前从未真正绑定）：
+      1. 持仓排名前 60% → 留仓观察（protected），无条件保留；
+      2. 剩余槽位先由"新进入者"按得分从高到低竞争：非持仓行业须得分 ≥ 当前持仓最低分
+         + SWAP_GAP 才能占槽（z 分加法）；得分不足即停止（其后得分更低）；
+      3. 槽位仍未满时由弱持仓（非 protected）按得分从高到低兜底保留——
+         "宁可少换，不因微小差距反复换仓"。
+    修复前：`if i in held: target.add(i)` 无条件保留持仓直到槽位填满，新进入者几乎无
+    机会参与竞争，SWAP_GAP 0.0~0.30 输出逐位相同（门槛从未被检查）。
     """
     s = score[:, t]
     avail = pooled[:, t] & ~np.isnan(s)
@@ -250,17 +253,18 @@ def select_target(t, cur, score, pooled):
     protected = {h for h in held if rank_pct.get(h, 1.0) <= STAY_PCT}
     min_held = min(s[h] for h in held)
     target = set(protected)
-    for i in order:
+    entrants = [i for i in order if i not in held and i not in target]
+    for i in entrants:
         if len(target) >= TOP_N:
             break
-        if i in target:
-            continue
-        if i in held:
-            target.add(i)
-        else:
-            if s[i] < min_held + SWAP_GAP:
-                break
-            target.add(i)
+        if s[i] < min_held + SWAP_GAP:
+            break
+        target.add(i)
+    weak_held = [h for h in held if h not in target]
+    for h in sorted(weak_held, key=lambda h: -s[h]):
+        if len(target) >= TOP_N:
+            break
+        target.add(h)
     return list(target)
 
 
@@ -438,7 +442,12 @@ def backtest(panel, fac, start=START, end=None):
             gross = np.abs(base - weights).sum()
             turn = gross / 2.0
             if turn > month_budget:
-                base, gross, turn = apply_turnover_cap(weights, sel, score[:, t], month_budget, tgt_w)
+                # v1.2（策略层审计 S-3 联动修复）：换手预算受限时，先按 desired_scale
+                # 缩放当前持仓（波动率上限是硬约束），再成对选股替换——替换 1:1 不改变
+                # 总暴露。原实现以未缩放持仓直接替换，未换旧持仓保持 1.0 刻度，
+                # 换手受限日目标暴露突破 desired_scale 上限（实测 tgt=0.75 > 上限 0.5）。
+                scaled_w = weights * (desired_scale / scale) if scale > 1e-12 else weights * desired_scale
+                base, gross, turn = apply_turnover_cap(scaled_w, sel, score[:, t], month_budget, tgt_w)
         else:
             base = weights.copy()
             gross = 0.0
@@ -494,7 +503,7 @@ def backtest(panel, fac, start=START, end=None):
             if rebal:
                 scale = desired_scale   # 调仓挂单执行后实际暴露即目标系数
         holdings_history.append({"date": str(dates[t].date()), "weights": weights.copy(),
-                                 "scale": scale, "cb": cb_active,
+                                 "scale": scale, "cb": cb_active, "rebal": bool(rebal),
                                  "mk_pct": round(float(mk_pct), 3), "mk_scale": float(mk_scale),
                                  "tgt": float(base.sum()) if turn > 1e-9 else None})
 
