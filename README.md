@@ -3,7 +3,7 @@
 中证红利低波动全收益指数（H20269）v7.13 策略的实时监控产品：
 **新手漏斗式仪表盘**：「① 今天做什么（人话结论+对应ETF+金额）→ ② 市场情绪温度计 → ③ 我的仓位（本金输入自动换算）→ ④ 策略概览 → ⑤ 回测证据/术语/买卖点（默认折叠）」，每天北京时间 8:00 由 GitHub Actions 自动更新并覆盖推送到 HSK 文件托管。
 
-**v7.14 新增行业轮动策略（`#/sel-sector`，v1.0）**：实现《ETF行业轮动量化策略方案》（2026-09）——21 行业 × 30 只 ETF 标的池、截面多因子得分（动量 50% / 波动率 20% / 拥挤度 20% / 反转 10%）、Top-4 月度轮动 + 15% 换仓门槛 + 月中加速、四项风控（超额收益熔断 / 单行业止损 / 市场波动率过滤 / 单月换手上限）、2018 至今回测；与红利低波同仓流水线（每日同 job 更新、输入存档 data/、幂等断言、HSK 发布自检）。
+**v7.14 新增行业轮动策略（`#/sel-sector`，v1.0 → v1.1 审计整改）**：实现《ETF行业轮动量化策略方案》（2026-09）——21 行业 × 32 只 ETF 标的池、截面多因子得分（动量 50% / 波动率 20% / 拥挤度 20% / 反转 10%）、Top-4 月度轮动 + 15% 换仓门槛（z 分加法）+ 月中加速、四项风控（超额收益熔断[滚动窗口+绝对pp] / 单行业止损 / 市场波动率过滤 / 单月换手上限）、2018 至今回测；按《数据工程回测审计报告》（2026-09-11，18 项 P0/P1/P2）完成系统性整改：盘中半截 K 线清洗（以抓取时刻判定收盘）、过拟合体检（参数敏感性/Walk-Forward/随机对照 n=150）、基准补全（夏普/IR/同暴露折算）、成本模型拆分（滑点 5bp+佣金 max(万1,5元)）等；与红利低波同仓流水线（每日同 job 更新、输入存档 data/、幂等断言、HSK 发布自检）。
 
 **v7.13 左侧目录导航**：页面左侧新增可点击的树形目录——一级「选ETF / ETF择时」；「ETF择时」下设 红利低波（已上线）/ 沪深300 / 中证500；「选ETF」下设 资产配置策略 / **行业轮动策略（已上线）** / 估值驱动策略 / ETF分类（三级：宽基ETF·中风险 / 行业主题ETF·高风险 / 跨境ETF·高风险）。除红利低波与行业轮动外的节点为得体空页（面包屑 + 建设中说明）。hash 路由（#/timing/hongli、#/sel-sector 等），移动端侧栏折叠为左下角抽屉按钮。
 
@@ -18,8 +18,9 @@ repo/
 ├── backtest/sensitivity.json # 参数敏感性 + walk-forward 结果
 ├── trade_calendar.csv        # A股交易日历（2013-2026，akshare sina）
 ├── sector_engine.py          # 行业轮动统一引擎（v1.0：因子/回测/风控/快照，update 与回测共用单一实现）
-├── sector_universe.py        # 行业轮动标的池（21 行业 × 30 ETF）与行情抓取（东财 + 中证官网）
+├── sector_universe.py        # 行业轮动标的池（21 行业 × 32 ETF）与行情抓取（东财 + 中证官网）
 ├── sector_update.py          # 行业轮动每日更新：抓取→校验→引擎→生成 sector payload→注入 index.html→归档
+├── sector_sensitivity.py     # 行业轮动过拟合体检（P0-4）：参数敏感性 + Walk-Forward + 随机选股对照 → data/sector-sensitivity.json
 ├── payload_util.py           # PAYLOAD 提取/注入（update.py 与 sector_update.py 共用，carry-forward 互不覆盖）
 ├── index.html                # 对外展示页（由模板+两套数据生成，推送此文件）
 ├── index_template.html       # 页面模板（占位符 __PAYLOAD__，注入红利低波 + 行业轮动两套数据）
@@ -29,7 +30,7 @@ repo/
 ├── data/                     # 每日原始输入存档（H20269/H30269-YYYYMMDD.json、snapshot-YYYYMMDD.json、sector-raw-YYYYMMDD.json.gz、sector-snapshot-YYYYMMDD.json）
 ├── requirements.txt          # 依赖锁定（pandas / numpy，无 akshare）
 ├── tests/test_engine.py      # 红利低波引擎最小单元测试
-├── tests/test_sector_engine.py  # 行业轮动引擎最小单元测试（14 项）
+├── tests/test_sector_engine.py  # 行业轮动引擎最小单元测试（26 项）
 └── .github/workflows/daily.yml
 ```
 
@@ -41,7 +42,8 @@ repo/
 ```bash
 pip install -r requirements.txt
 python3 -m unittest tests.test_engine -v           # 红利低波引擎单测（验证指标/状态机/T+1/净值复算/抄底闭环）
-python3 -m unittest tests.test_sector_engine -v    # 行业轮动引擎单测（14 项：因子/选股规则/止损/熔断/波动率过滤/T+1）
+python3 -m unittest tests.test_sector_engine -v    # 行业轮动引擎单测（26 项：因子/选股规则/止损/熔断/波动率过滤/T+1/基准/挂单）
+python3 sector_sensitivity.py                      # 行业轮动过拟合体检（P0-4）→ data/sector-sensitivity.json
 python3 backtest/prep_data.py                      # 从接口重新生成行情 CSV（清洗规则固化）
 python3 update.py                                  # 红利低波：在线抓行情 → 校验 → 生成 index.html + backtest_data.json
 python3 sector_update.py                           # 行业轮动：在线抓取 → 校验 → 生成 index.html（含 sector 段）+ sector_data.json

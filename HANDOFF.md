@@ -514,3 +514,54 @@ create ticket 可用。用户已拍板"发布为新资源"。最终发布机制�
 - **坑**：仓库根存在旧 engine.py（无 make_params），测试 import 顺序必须 BACKTEST 后插优先；
   到期卖出 reason 用 f-string 携带 HOLD_DAYS（勿硬编码 120 污染红利低波）；due 过滤用
   "卖出一档临时仓" 避免误匹配 "离场满90自然日·强制回补"。
+
+## §30 行业轮动审计整改 v1.1（2026-09-11，18 项 P0/P1/P2 闭环）
+
+**输入**：用户上传《行业轮动策略_数据工程回测审计报告.md》（v2 最终版，18 项问题 + §5 修复方向）。
+**范围**：sector_engine / sector_update / sector_universe / sector_sensitivity（新）/ daily.yml / index_template / tests。
+**已知勿重做**：报告"2015-2017 成交额 0"与"41% 截面负分"判无法复现（审计 §5 注明）。
+
+- **P0-1 盘中半截 K 线 + 增量不自愈**：clean_intraday 在抓取后、引擎前强制清洗。
+  last_closed_date 双修复：① 15:30 收盘时刻判断（原把未收盘今天当收盘日，活跃 ETF 半截行
+  amount≥全天 60% 漏检）；② **以 raw.fetched_at 为参照**（盘中抓的 raw 在收盘后重放时半截行
+  仍被剔）；③ _TRADE_DAYS 是 set，`[d for d in ... if d<=today]` 无序，cand[-1] 非最大日→排序修复。
+  clean 规则收敛为"末日 > 最近已收盘交易日 → 剔除"（删除成交额半截检测：以 fetched_at 参照后
+  盘中行必被规则 1 覆盖；对历史完整日做 amount 检测会误删真实缩量日——实测 09-10 全天成交
+  仅近 5 日均 51% 的 ETF 被误剔，A/B 验证后重写）。
+- **P0-2 熔断被 run_max 单调支配**：改滚动窗口 + 绝对 pp——`exc20 < run_max(近252日) - 0.08 且
+  exc20<0`，或 `run_max<=0 且 exc20 < -0.08`；恢复=市场 20 日动量转正且 ≥10 日；触发需连续确认
+  5 日、至少保持 10 交易日（防抖）。CB_LOOKBACK=252。修复后熔断真正按 8pp 门槛工作（此前是择时开关）。
+- **P0-3 截面不等价**：反转阈值 max(0.10, 1/n_avail)（小截面名次放宽）；截面分位/掩码统一按
+  已入池行业（vol_pct/crowd_pct/r5_pct 与 mom_z 同掩码）。
+- **P0-4 无过拟合体检**：sector_sensitivity.py（SENS 8 参数 × 3 档 + WF 三区间 + 随机对照
+  RAND_N=150 seed42）。**修复坑**：backtest 的 end 截断只截 n 不截数组 → P/R/score/pooled/csi_ret
+  全量广播错位，WF 段崩——`P[:,:n]/R[:,:n]/score[:,:n]/pooled[:,:n]/csi_ret[:n]` 对齐。
+  结果：真实夏普 0.558 分位 88%、p=0.120（审计 p=0.113 同量级，不显著 → 页面如实披露
+  "不显著（过拟合风险，与审计结论一致）"）。页面新增"过拟合体检"折叠卡（随机对照/WF/参数表）。
+- **P1-6/8**：拥挤度等截面统一入池掩码；SWAP_GAP/ACCEL_GAP 改 z 分加法（+0.15/+0.20）。
+- **P1-7**：止损清仓只卖一次（非调仓日不双重计费）；P1-14：成本拆分 SLIP_BPS=5/COMM_RATE=万1/
+  COMM_MIN=5（单边实际约 9bp）+ cost_sensitivity(panel,fac) 费率 ×1/2/4/6。
+- **P1-9**：data_quality 换手率越界 0<turn<100（实测 2124 行，与审计吻合）+ 成交额零值 +
+  近60日均额<5000万 4 只（基建ETF银华日均约 800 万）；warn 级披露不阻断。
+- **P1-10**：kline_overlap_scale 替代 kline_scale_jump（重叠日 b/d 价=精确复权因子，KLINE_SCALE_TOL=0.005）。
+- **P1-11**：基准补全 csi/ew 夏普、信息比率、同暴露折算（平均暴露约 63%）、avg_exposure。
+- **P1-12**：annual 以上一年末为基准 + 连乘断言未取整值；P1-13：幸存者披露 32 ETF；
+  P1-15：CI content_sha 比对。
+- **P2-1**：snapshot risk.pending_rebalance（挂单待执行）；P2-3：validate 缺失≥3 或末日超前→硬失败；
+  P2-4：_grab_em 对基线缺失 ETF 也写增量归档；P2-5：sector_universe 空响应兜底；
+  **P2-5b（新发现）**：本地直跑从不调用 archive_incremental（注释谎称"抓取阶段已归档"）→
+  次日 rebuild_base 缺当天增量，已修 main 补归档；P2-9：vol_pct/vol_mult 真实字段；
+  P2-10：thin_series 强制含 argmin/argmax；P2-11：删死代码 csi_px。
+- **回测数字（重抓 32/32 + 清洗后末日 09-10 干净面板）**：+102.1% / 夏普 0.56 / 回撤 -35.6% /
+  499 笔 / 年换手 4.27 / 成本 8117 元（10 万口径）；基准沪深300 +37.5% / 等权 +69.9%；
+  annual 2018 -17.8% … 2026 +2.5%；avg_exposure 69.2%；cost_sensitivity 6x 费率 0.5605。
+  数据质量披露 2124 行越界 + 4 只流动性不达标 + 增量归档 sector-incr-20260911.json.gz（32+CSI2）。
+- **关键调试链（+164.9% 异常根因）**：新 raw 里 2 只 ETF（516950/512760）末日 2026-09-11 盘中行
+  amount 达全天 60%+ → last_closed 缺陷漏检 → 污染末日净值/信号。修复后 [收盘清洗] 剔除 2 条、
+  末日分布 32/32 → 09-10。另 A/B 验证：删 512720 得 +164.9% 是"少一个老行业→截面重构"的正常
+  结果，非数据有毒（512720 收益极值 ±10% 为正常 A 股涨跌停）。
+- **测试**：tests 60 passed（test_sector_engine 26 / test_incremental 11 / test_engine 16 /
+  test_hs300 8；clean_intraday 测试改 fetched_at 参照——盘中 09:49 剔、收盘 16:00 留）。
+- **验证**：dry×2 幂等 OK；chrome headless dump-dom：体检卡渲染（88.0 分位 p=0.120）、s-date
+  2026-09-10、s-risk/s-kpis/数据质量披露全在。git 140e47d push + CI run 34553077467。
+- **发布**：CI 完成后验证线上（新 URL 若因 HSK 403 重建需告知用户）三端 data_date + content_sha。
