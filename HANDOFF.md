@@ -847,6 +847,13 @@ helper，写入自动删过期年份文件）；housekeeping 输出 data/ 体积
   失败 114 = ~102 只腾讯侧数据断档/缺 hfqday（A 型：proxy 无 hfqday 但 day 有，如 sz001232，
   待 ifzq 解封自动补；B 型：腾讯数据断档/停牌，如 sz301139 停更 08-28），次日增量自动重试；
   本地与 CI 间 manifest.jsonl 并发冲突已用 pull --rebase 常规化解
+- **ifzq 解封验证 + 缺口定性**（2026-09-15）：web.ifzq.gtimg.cn 已解封（200 正常返回），
+  ifzq.gtimg.cn 仍 501（WAF）。解封后逐主机探测 105 只 hfq 缺口：**三主机（proxy/ifzq/web.ifzq）
+  一致无 hfqday** —— 此前"约 10 只 A 型待解封补齐"的判断不成立：如 sz001232/sz601123/sz688981
+  即使 hfq=true 也只返回 `day` 字段（腾讯源对该股无 hfq 数据），sz000016 有 hfqday 但停更在 08 月初；
+  结论：**不存在可补的 A 型，缺口全部为腾讯数据源本身断档（B 型）**。当前数据状态：
+  raw 12 只缺口、hfq 105 只缺口，均非代码/WAF 问题，`fetch_stock` 增量会每日重试但预期持续失败
+  （117 请求失败不触发 WAF 退避，proxy 通道正常，CI run 34925809493 同批 117 失败无退避日志）
 - 东财 push2his / 网易 163 chddata 均不可用（本机测试：东财 Empty reply 拒连、163 502）
 
 ### 已知限制 / 后续
