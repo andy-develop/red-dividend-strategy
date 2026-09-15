@@ -854,6 +854,17 @@ helper，写入自动删过期年份文件）；housekeeping 输出 data/ 体积
   结论：**不存在可补的 A 型，缺口全部为腾讯数据源本身断档（B 型）**。当前数据状态：
   raw 12 只缺口、hfq 105 只缺口，均非代码/WAF 问题，`fetch_stock` 增量会每日重试但预期持续失败
   （117 请求失败不触发 WAF 退避，proxy 通道正常，CI run 34925809493 同批 117 失败无退避日志）
+- **数据融合目标达成审计**（2026-09-15 11:55 本地端到端复验）：四需求逐项对照全部闭环——
+  ① 统一仓库 quant-data（GitHub）+ 日增量（mirror 16:35 收盘入库 / portal 12:00 页面更新双任务）+ 体积可控
+  （housekeeping 周一 compact 并入年份分片、因子层 gitignored；当前 .git 302M）；
+  ② 股票 3 年 hfq 3,610,087 行 / 5,227 只（4,776 只完整 3 年）+ 指数 10 年（000001/000300/000852/000905/
+  H00300 均 10.7~13.0 年）+ ETF 32 只全历史（2015→09-14）；
+  ③ 中间层 build_factors → data/factors/{etf,index,stock}.parquet（确定性可重算，3,600,526 行股票因子）；
+  ④ 工作日 12:00 更新、14:00 前出结果（portal.yml cron `0 4 * * 1-5` + 75min timeout + 发布后 verify 线上
+  data_date 三方一致）；ETF 策略用当天上午结果（fetch_snapshot 11:30 实时 → morning 段）。
+  复验发现：本地重算的 stock.json 因子与 CI 08:34 版本有 13,278 处差异 —— 因本地 hfq 回填后因子层
+  重算所致（CI 构建时 hfq 尚不完整），**属预期数据演进，非 bug**；hl/hs300/sector 仅 generated_at 时间戳
+  差异（完全确定性）。本地验证产物已还原不提交，12:00 CI 会基于完整 hfq 自动重建并发布正确版本
 - 东财 push2his / 网易 163 chddata 均不可用（本机测试：东财 Empty reply 拒连、163 502）
 
 ### 已知限制 / 后续
