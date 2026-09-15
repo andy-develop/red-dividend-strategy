@@ -613,3 +613,245 @@ create ticket 可用。用户已拍板"发布为新资源"。最终发布机制�
   data/sector-sensitivity.json（含 neighborhood 6 档）、data/hs300-sensitivity.json。
 - **验证**：payload_util.extract 三端 OK（sector data_date=2026-09-10、hs300 state=C pos=125%）；
   chrome headless dump-dom 渲染 +104.4%/+102.1% 正常；披露关键词全部落盘。
+
+## §32 量化策略门户（三产品前端合并 v1.0，2026-09-14）
+
+**输入**：用户要求把 短线策略（stock-factor-engine）＋ ETF策略（red-dividend-strategy）＋
+个性化选股（stock-factor-engine 第二页）合并为单一门户页面，左上角三分类可切换、每类带
+自己的目录树与内容、UI 风格一致。经澄清确定：短线策略与个性化选股共用因子引擎页（选股
+主页＝短线入口，因子库/回测/方案＝个性化选股），先手动合并不改 CI/发布链路。
+
+### 目录与文件
+- `quant-portal/template.html`：门户宿主模板（约 2400 行，含待构建占位符）
+- `quant-portal/build_portal.py`：构建脚本（模板 → index.html）
+- `quant-portal/index.html`：构建产物（约 574 KB）
+- `quant-portal/echarts.min.js`：ECharts 5.5.0 本地副本（**必须本地，见下方注意事项**）
+
+### 路由设计（hash 路由）
+- `CAT_INFO`：三分类默认路由 short→`#/short-home`、etf→`#/timing-hongli`、pick→`#/pick-factors`
+- `categoryOf(key)`：按前缀识别分类——`short-`→short、`pick-`→pick、其余→etf
+- `CAT_TREES`：short/etf/pick 三组侧边栏树；`routeTo()` 在分类切换时重渲染侧边栏并
+  `showView(id)` 切换视图；ETF 侧原路由（`#/sel-sector`、`#/timing-hs300`、`#/timing-hongli`、
+  `#/sel-asset`、`#/sel-value` 等）全部兼容，可用 `location.hash = "#/xxx"` 直达。
+- `PORTAL_VIEWS = ["view-hongli","view-empty","view-sector","view-hs300","view-shome","view-pick"]`；
+  stock 一侧不再维护自身 hash 路由，由路由层调用 `window.PickEngine.show(view)`
+  （home/factors/backtest/about）。
+- 防死循环：`routeTo` 递归 fallback 中 `if (key === def) def = "timing-hongli"`；
+  `findNode(key, tree)` 必须显式传入目标分类树（勿依赖 currentTree，初始为 ETF 树会找不到
+  short/pick 节点导致 RangeError 递归爆栈）。
+
+### 样式与语义
+- 门户顶栏 `.portal-bar`（品牌 + 三分类 tab），分类树 `.p-tab[data-cat]` 点击
+  `location.hash = "#/" + CAT_INFO[cat].default`。
+- **红涨/绿涨语义隔离**：ETF 用 `--up:#E0443C`（红涨），stock 引擎用 `--up:#16A34A`（绿涨），
+  二者语义相反。通过 `.pzone` 类作用域隔离 CSS 变量——`.pzone` 复用 ETF 的
+  `--ink/--ink2/--sub/--dim/--line/--card`，仅重定义 `--primary/--primary-light/--up/--down/
+  --accent/--card-2/--radius/--shadow/--num`；同时 `.badge`→`.pbadge`、`.view`→`.pview`
+  避免全局冲突。
+
+### 构建与日常数据刷新
+```bash
+cd /Users/andy/Documents/quant/quant-portal && python3 build_portal.py
+```
+- ETF 数据：从 `red-dividend-strategy/index.html` 用 `payload_util.extract()` 整体提取
+  snapshot/backtest/hs300/sector 四段 PAYLOAD（carry-forward，保证最全）。
+- 选股数据：注入 `stock-factor-engine/data/stocks.json`（5180 只）与 `factors.json` 到
+  `/*__STOCK_UNIVERSE__*/[]` / `/*__REAL_FACTORS__*/{}` 占位符。
+- 日常刷新顺序：先跑 red-dividend-strategy 的 update.py / hs300_update.py / sector_update.py
+  生成新 index.html（含三端 PAYLOAD）→ 再跑 build_portal.py 提取注入 → 验证门户。
+- 构建脚本校验占位符全部替换，残留则报错退出（exit 1）。
+
+### 注意事项（踩坑记录）
+- **ECharts 必须本地化**：模板曾用 jsdelivr CDN，浏览器 WebView 网络请求挂起（60s 超时、
+  "WebView is not ready yet"）；curl 显示 200 但浏览器仍卡。必须用本地 `echarts.min.js`。
+- **ECharts 懒初始化**：隐藏容器（offsetWidth=0）初始化图表会失败。stock 图表仅在视图可见时
+  初始化（`PickEngine.show()`）；radar 用 `if(!radarChart) initRadar()`；backtest 每次
+  `dispose()` 后重建；ETF 侧保持 `.toggle` 展开时懒加载（btDet/xbtDet → initCharts）。
+- **数据注入风格**：`json.dumps(ensure_ascii=False, separators=(",", ":"))`（与 ETF 一致）。
+- factors.json 当前为空 dict（可容忍，前端有内置 36 因子兜底表）；构建无报错。
+
+### 已验证验收记录（浏览器全量，2026-09-14）
+- `#/short-home` 选股主页：自选股 5 只＋相似增强推荐 5 条＋回测概览 KPI 完整加载
+- 推荐弹窗：点击股票 → recModal 展示相似度%＋7 维因子暴露对比表＋风险提示；"换一批"刷新列表
+  ＋toast；删除自选股计数 5→4＋toast；雷达刷新 toast"画像已刷新"
+- ETF 三页：红利低波（44 笔）、中证500（占位"内容建设中"）、沪深300（41 笔，展开"回测证据"
+  → x-nav-chart/x-dd-chart canvas 懒加载）；行业轮动 sel-sector 双 canvas；资产配置/估值驱动占位
+- 个性化选股：36 因子表＋估值过滤器（4 行）；回测验证（btChart canvas 476×360＋6 年分年收益表）；
+  方案说明页
+- 移动端（viewport 534px）："打开目录"按钮 → sidebar 抽屉＋mask 正常
+- 浏览器 console 无页面 JS 错误（仅环境内部 MaxListenersExceededWarning）
+
+### 已知限制 / 后续
+- 门户当前为手动合并的静态单页；CI/发布链路未接入（按用户指示先手动合并）。
+- factors.json 为空时因子表显示内置兜底 36 因子；接入真实因子数据后自动覆盖。
+- 移动端抽屉与门户 tab 在超窄屏（<400px）的细节可再打磨。
+
+## §33 短线策略改为量化实验室报告（动量策略 + 量化黑盒，2026-09-14）
+
+**输入**：用户指出门户 `#/short-home` 实际展示的是"个性化选股"内容，属分类错误——短线策略
+应展示 动量策略 与 黑盒策略（quant-lab 仓库，A股短线动量 + 量化黑盒 LightGBM）。经澄清确定：
+原选股主页（AI 智能选股引擎）整体移入"个性化选股"分类（`#/pick-home`），短线策略容器改为
+quant-lab 报告双页移植（`#/short-momentum` + `#/short-blackbox`）。
+
+### 数据源
+- 报告产物：`/Users/andy/WorkBuddy/2026-09-03-14-42-54/quant-lab/report/index.html`
+  （本机唯一双页报告：`page-momentum` + `page-blackbox`，各带 `bb_` 前缀 DOM；约 1 MB，
+  数据截至 2026-09-10，生成于 2026-09-11 10:13）。
+- `const MODES = {...};` 与 `const MODES_BB = {...};` 为 line 295/296 两行超长 JSON（顶层
+  仅 `y3` 一个窗口 = 回测全期，区间切换由前端切片完成）。
+- 报告可能随 CI/WorkBuddy 更新变动：构建脚本支持环境变量 `QLAB_REPORT` 覆盖，默认探测
+  `QLAB_CANDIDATES`（2026-09-03 优先、2026-09-08 备选）。
+- 备选单页版 `quant-lab-ml/report/index.html`（仅黑白盒）未采用——用户要求动量＋黑盒都要。
+
+### 路由变更（相对 §32）
+- `CAT_INFO`：short 默认 `#/short-momentum`；pick 默认 `#/pick-home`。
+- `CAT_TREES.short`：动量策略 / 量化黑盒；`CAT_TREES.pick`：选股主页/因子库/回测验证/方案说明。
+- `PAGE` 新增 `short-momentum`/`short-blackbox`（`qlab:"momentum"/"blackbox"`）与
+  `pick-home`（`shome:true`）。旧 `#/short-home` 无对应节点，自动兜底到 `#/short-momentum`。
+- `PORTAL_VIEWS` 新增 `view-short`（QLab 容器），`view-shome` 保留（选股主页容器）。
+- 路由层：`pg.qlab` → `showView("view-short")` + `window.QLab.show(pg.qlab)`（80ms 延迟
+  保证容器可见后再初始化 ECharts，否则隐藏容器 offsetWidth=0 初始化失败）。
+- **categoryOf 必须识别分类根 key**：`key === "short" || key.indexOf("short-")===0`（pick 同理），
+  否则 `#/short`、`#/pick` 会被归入 etf 并兜底到红利低波（本版本修掉的 bug）。
+
+### 实现要点
+- `view-short` 容器：双页 `.qlab .wrap.page`，黑盒页全部 id 加 `bb_` 前缀（bb_kpiTable/
+  bb_eqChart/bb_holdTable/bb_tradeToggle…）；黑盒 h1 修正为"量化黑盒"（原报告误写"动量策略"）。
+- `.qlab` CSS 作用域：独立色板（红涨 `--up:#D5423E`，与 ETF 一致、与 stock 引擎绿涨相反），
+  覆盖门户裸 `table/th/td` 全局规则（background/加粗/白底），`.qlab .doc` 提供策略说明样式
+  （原报告每页内嵌 `<style>` 已去除，统一作用域）。
+- 第三个 `<script>`：`window.QLab`（show/init）。**懒初始化**——首次 `QLab.show()` 时把两页
+  依次置为可见分别 `initPage()`，再恢复隐藏；之后 show 只切 display + `dispatch resize`。
+  `initPage(P, MODES, STRAT_LABEL)` 全量迁移自原报告（KPI 表/净值三线/卖出原因/买入排名/
+  计划表/持仓表/交易明细折叠/区间切换/仓位控制开-关），**全部改写为 ES5**（原报告用箭头函数
+  与 `const/let`）。数据缺失降级：`MODES.y3.on` 不存在时 warnBar 提示并 return。
+
+### 构建
+```bash
+cd /Users/andy/Documents/quant/quant-portal && python3 build_portal.py
+QLAB_REPORT=/path/to/quant-lab/report/index.html python3 build_portal.py  # 覆盖数据源
+```
+- 新增 `extract_qlab_payload()`：按行前缀（`const MODES = `/`const MODES_BB = `）提取两段
+  JSON 并 `json.loads` 校验（比跨行正则可靠，JSON 字符串内可能含 `};`）。
+- 注入占位符 `/*__QLAB_MOMENTUM__*/{}` / `/*__QLAB_BLACKBOX__*/{}`（同样
+  `json.dumps(ensure_ascii=False, separators=(",", ":"))`），并加入残留校验列表。
+
+### 已验证验收记录（浏览器全量，2026-09-14）
+- `#/short-momentum`：动量策略 KPI 表 4 行（区间收益 +43.99%）、净值图 3 线 canvas、当前持仓
+  6 只、warnBar/计划/交易明细区完整渲染。
+- `#/short-blackbox`：量化黑盒 KPI（+10.59%/-8.32%/夏普 0.75/胜率 36.2%·177 笔）、净值图、
+  持仓 9 只；仓位控制 开→关（KPI 变 -6.48%、warnBar/footer 文案切换）；区间切到"近一周"
+  （eqNote 2026-09-03~2026-09-10、交易 5 笔、KPI -2.61%）；交易明细折叠展开（5 行）。
+- 动量/黑盒页面互切正常；`#/short` 总览、`#/pick` 总览、`#/pick-home` 选股主页（自选股+
+  添加/换一批）、`#/timing-hongli`/`#/timing-hs300`/`#/sel-sector` 全部回归通过。
+- 旧 `#/short-home` 自动落到动量策略页；浏览器 console 无 JS 错误。
+- 已知：浏览器对 index.html 有 HTTP 缓存，验证需带 query（`index.html?v=N`）强刷。
+
+### 已知限制 / 后续
+- QLab 报告数据依赖 WorkBuddy 快照（2026-09-03），后续 quant-lab 新报告需重新跑
+  `build_portal.py`（或设 `QLAB_REPORT`）；未接入自动拉取仓库（网络受限）。
+- 黑盒/动量交易明细上限 400 笔（与原报告一致）；区间切片与整页归一口径沿用原报告。
+
+## §34 quant-data 统一数据仓库（数据融合，2026-09-15）
+
+**输入**：用户要求"页面的融合 OK，现在要融合数据，只维护一份数据"——数据统一管理、
+存在 GitHub 仓库、日级增量更新、删除不用数据控制仓库体积；至少含**股票 3 年 K 线 +
+主要指数 10 年 K 线**；可设计中间层（因子等）；工作日 **12:00 开始更新整个页面、14:00 前
+出网页端结果**，ETF 策略用当天上午结果计算。经 AskUserQuestion 确认：**GitHub Actions 全自动**。
+
+### 仓库与位置
+- GitHub：https://github.com/andy-develop/quant-data（**private**，2026-09-15 创建）
+- 本地镜像：`/Users/andy/Documents/quant/quant-data`（remote=origin main）
+- 依赖相邻：`../red-dividend-strategy`（**public**，CI sibling checkout 无需 PAT）
+- 当前 HEAD：70a7180（本地与远端同步；CI 自动 commit/push）
+
+### 数据范围与保留策略（housekeeping.py 强制）
+| 数据 | 范围 | 存储 | 保留 |
+|---|---|---|---|
+| 股票 K 线 raw/hfq | 全 A 股（腾讯式代码 1./0.） | `data/kline/stock/{raw,hfq}_YYYY.parquet` **按年分片**（单片 6-36MB）+ 日常 `{raw,hfq}_incr_YYYYMMDD.parquet` **日增量文件**（每周一 compact 并入分片） | 3 年滚动 |
+| 指数 K 线 | CSI 4（H20269/H30269/H00300/000300，13 年）+ TX 3（000001/000905/000852，10 年） | `data/kline/index/*.parquet` | 13 年全量（保引擎预热：div_proxy shift(252)+spread_pct rolling(756,min604)） |
+| ETF K 线 | 32 只（行业轮动标的池） | `data/kline/etf/etf_kline.parquet` | 全量 |
+| 上午快照 | 32 ETF + 5 指数实时（11:30） | `data/snapshot/{etf,index}_<day>.parquet` | 7 天文件滚动 |
+| 因子层 | DuckDB 日度因子 | `data/factors/` | **gitignored**（确定性产物，每次重算） |
+| payload | hl/hs300/sector/stock/morning 5 段 | `data/payload/*.json` | 入库（门户构建输入） |
+| qlab 归档 | 动量/黑盒报告 JSON（无 quant-lab 报告时的回退） | `data/qlab/` | 入库 |
+
+GitHub 硬限 100MB/软限 50MB → 股票 K 线**按年份分片**（common.py `stock_read`/`stock_write`
+helper，写入自动删过期年份文件）；housekeeping 输出 data/ 体积报告（1GB 软限预警）。
+
+### 脚本清单（scripts/，均幂等增量）
+- `migrate.py`：一次性迁移（quant-lab 股票 K 线 → 分片；red-dividend 指数/ETF → parquet）
+- `fetch_index.py`：CSI index-perf（T-1 完整收盘口径）+ 腾讯 fqkline（last_complete_day 清洗盘中半截 bar）
+- `fetch_etf.py`：东财主通道 + **腾讯兜底**（`PREFER_TX=1` 直连腾讯，东财对 CI runner IP 连接级限流）
+- `fetch_stock.py`：**股票日K 增量（全 A 股，腾讯双通道防 WAF）**——raw 走 `qt.gtimg.cn` 批量快照
+  （全市场约 90 请求，仅取最后完整交易日）+ hfq 走 fqkline 逐股（全局限速 ~2.5 QPS，
+  连续失败自动退避 60s，**退避 >3 轮则中止**防 CI 空转）；`--backfill`/`--days N`/`--limit N`
+  支持补漏与沙箱测试；只写日增量小文件
+  ⚠️ WAF 经验（2026-09-15 更新）：`ifzq.gtimg.cn` 与 `web.ifzq.gtimg.cn` 的 fqkline **双主机
+  均曾被封**（501page，按主机轮换、数小时反转）→ **首选 `proxy.finance.qq.com`**（腾讯官方代理
+  域名，路径带 `/ifzqgtimg` 前缀；实测 30+ 连发不触发 WAF，hfq 数值与 ifzq 通道逐位一致）；
+  主机池故障转移：请求按存活顺序尝试（proxy → ifzq → web.ifzq），被封主机 10 分钟自动回归。
+  ⚠️ **FQ_MAX=800**：腾讯 fqkline max 参数 >800 会被截断到 640 根（不足 3 年），800 才拿全
+  （2023-09-15 起 725 根）。**降级探测 backoff=False + 单次重试**：proxy 对个别股票缺 hfqday
+  （如 sh688981/sz000016，腾讯侧数据源差异）时降级到其余主机，但不计入全局 WAF 退避，
+  避免 empty 股票误触发退避中止。
+- `fetch_snapshot.py`：腾讯批量实时快照（ETF 32 + 指数 5）→ 7 天保留
+- `build_factors.py`：DuckDB 股票日度因子（价格/量比，DuckDB glob 分片）
+- `gen_payload.py`：**复用 red-dividend-strategy 引擎**（backtest/engine.py + update.py + sector_*）
+  生成 hl/hs300/sector/stock/morning 5 段；⚠️ 必须 `sys.path.insert(0, RED)` 再插 `RED/backtest`，
+  并用 `EBT.__file__` 断言防顶层旧 engine.py 遮蔽
+- `housekeeping.py`：3y/13y/7 天滚动保留 + tmp 清理 + 体积报告
+- `portal/build_portal.py`：模板 + payload → index.html（qlab 段优先本地报告，回退 data/qlab/）
+
+### 双 GHA 任务（满足"12:00 开始、14:00 前出结果"）
+1. **portal.yml**（`0 4 * * 1-5` UTC = **北京 12:00**，workflow_dispatch 可用，75min timeout，
+   concurrency 防重叠）：sibling checkout red-dividend-strategy → fetch_index → fetch_etf(PREFER_TX=1)
+   → fetch_stock(`|| warn` 非阻断，mirror 已入库时秒级 no-op) → fetch_snapshot(`|| warn` 不阻断)
+   → build_factors → gen_payload → build_portal → commit data →
+   **HSK 文件托管发布**（skip-if-unchanged：data_date 三端 + content_sha）→ verify 线上 data_date。
+2. **mirror.yml**（`35 8 * * 1-5` UTC = **北京 16:35**，120min timeout）：收盘后镜像当日完整 K 线
+   （fetch_index → fetch_etf → **fetch_stock：股票日增量主通道**）→ housekeeping
+   （**周一 `--compact`** 把日增量并入年份分片并清理）→ 有变更才 commit+push（节假日自动空转）。
+   commit 步骤先 `git pull --rebase` 再 push，防并发推送（手动 push / 两流水线重叠）导致非快进被拒。
+
+口径：A 股日 K 15:00 收盘后才完整 → 12:00 任务信号基于 **T-1 完整收盘**；"当天上午结果"=
+11:30 实时快照（morning 段，双轨展示）。
+
+### HSK 发布（复用 red-dividend-strategy 通道）
+- secrets：`HSK_API_KEY`（本地 `~/.hsk/api_key.json` file_hosting key）；`HSK_RESOURCE_ID` 未配置
+  （首次运行自动创建新资源并持久化 `data/hsk-resource.json`）
+- 线上地址：**https://jjhujm.gicp.fun**（resource_id **1789432496960296437**）
+- 无数据变化跳过发布；403 11301002 自动创建新资源（`|| true` 防 set -e 中断）
+
+### 本地开发环境
+- Python：`/opt/homebrew/bin/python3.11` + venv `/Users/andy/Documents/quant/quant-data/.venv`
+  （系统 python 3.9 无 pyarrow，必须用 3.11）
+- 依赖：`requirements.txt`（pandas>=2.2 / pyarrow>=16 / duckdb>=1.0 / requests>=2.31 / numpy>=1.26）
+- 日常手动跑：`source .venv/bin/activate && python3 scripts/fetch_index.py && ...`
+
+### 验证记录（2026-09-15）
+- 本地沙箱全量管道全绿（fetch/build_factors/gen_payload，真实 08:11 数据）
+- 首次 CI dispatch（run 34913690827）**1m25s 15 步全绿**：发布 https://jjhujm.gicp.fun +
+  verify 线上 data_date 三方一致（红利低波/行业轮动/沪深300 均 2026-09-14）
+- 浏览器线上验证：短线·动量策略、ETF·红利低波（44 笔明细、生成时间 08:34 北京时间）、
+  morning 上午快照（m-date 2026-09-15、m-gen 08:34、ETF 32 只、指数 5 个）均渲染正常
+- **股票日增量 CI 验证**（run 34916895195）：fetch_stock 双通道成功——
+  `end=2026-09-14 批量raw 0 / fqkline 920，hfq 新增 18,336 行（2023-11-22→09-14），成功 741/920 耗时 2197s`；
+  发现 ~920 只股票 hfq 缺口（初始回填未覆盖）；commit 步骤因运行中手动 push 导致非快进被拒（数据丢在 runner），
+  已修 workflow（pull --rebase）+ 重跑（run 34919940617）恢复
+- 本地网络注意：github.com 直连间歇超时，可用 clash mixed-port **7897**
+  （`git -c http.proxy=http://127.0.0.1:7897 pull`）；api/raw 域名通常直连可达
+- **股票 hfq 3 年全量回填**（本地，commit 70a7180）：proxy 通道一次性补 908 只缺口
+  （24 无记录长窗口 + 884 陈旧短窗口），`成功 806/920 耗时 464s`；
+  合并后 hfq **3,610,087 行 / 5,227 只，4,776 只完整 3 年（>=720 天），5,110 只覆盖到 09-14**；
+  失败 114 = ~102 只腾讯侧数据断档/缺 hfqday（A 型：proxy 无 hfqday 但 day 有，如 sz001232，
+  待 ifzq 解封自动补；B 型：腾讯数据断档/停牌，如 sz301139 停更 08-28），次日增量自动重试；
+  本地与 CI 间 manifest.jsonl 并发冲突已用 pull --rebase 常规化解
+- 东财 push2his / 网易 163 chddata 均不可用（本机测试：东财 Empty reply 拒连、163 502）
+
+### 已知限制 / 后续
+- morning 快照 11:30 抓取，若失败回退最近快照（7 天保留），页面照常展示
+- gen_payload 依赖 red-dividend-strategy 引擎（sibling 路径约定），引擎升级需两侧同步验证
+- 股票按年分片：新增年份自动建片、过期年份自动删除；全表读取用 `stock_read()` 合并
+- 因子层不入库（每次重算），如需历史因子回放需另行持久化
+
